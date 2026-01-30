@@ -13,6 +13,10 @@ type CliOptions = {
   session?: string | undefined;
   debug?: boolean | undefined;
   help?: boolean | undefined;
+  // Tools configuration
+  toolsProfile?: string | undefined;
+  toolsAllow?: string[] | undefined;
+  toolsDeny?: string[] | undefined;
 };
 
 function printUsage() {
@@ -31,6 +35,16 @@ function printUsage() {
   console.log("  --session ID     Session ID for conversation persistence");
   console.log("  --debug          Enable debug logging");
   console.log("  --help, -h       Show this help");
+  console.log("");
+  console.log("Tools Configuration:");
+  console.log("  --tools-profile PROFILE  Tool profile (minimal, coding, web, full)");
+  console.log("  --tools-allow TOOLS      Allow specific tools (comma-separated, supports group:*)");
+  console.log("  --tools-deny TOOLS       Deny specific tools (comma-separated)");
+  console.log("");
+  console.log("Examples:");
+  console.log('  pnpm agent:cli --tools-profile coding "list files"');
+  console.log('  pnpm agent:cli --tools-profile minimal --tools-allow exec "run ls"');
+  console.log('  pnpm agent:cli --tools-deny exec,process "read file.txt"');
 }
 
 function parseArgs(argv: string[]) {
@@ -85,6 +99,20 @@ function parseArgs(argv: string[]) {
       opts.debug = true;
       continue;
     }
+    if (arg === "--tools-profile") {
+      opts.toolsProfile = args.shift();
+      continue;
+    }
+    if (arg === "--tools-allow") {
+      const value = args.shift();
+      opts.toolsAllow = value?.split(",").map((s) => s.trim()) ?? [];
+      continue;
+    }
+    if (arg === "--tools-deny") {
+      const value = args.shift();
+      opts.toolsDeny = value?.split(",").map((s) => s.trim()) ?? [];
+      continue;
+    }
     if (arg === "--") {
       promptParts.push(...args);
       break;
@@ -120,6 +148,16 @@ async function main() {
     process.exit(1);
   }
 
+  // Build tools config if any tools options are set
+  const toolsConfig =
+    opts.toolsProfile || opts.toolsAllow || opts.toolsDeny
+      ? {
+          profile: opts.toolsProfile as any,
+          allow: opts.toolsAllow,
+          deny: opts.toolsDeny,
+        }
+      : undefined;
+
   const agent = new Agent({
     profileId: opts.profile,
     provider: opts.provider,
@@ -131,6 +169,7 @@ async function main() {
     cwd: opts.cwd,
     sessionId: opts.session,
     debug: opts.debug,
+    tools: toolsConfig,
   });
 
   // If it's a newly created session, notify user of sessionId
