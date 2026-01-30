@@ -178,14 +178,45 @@ Or use the CLI:
 pnpm skills:cli remove <skill-name>
 ```
 
+### Progressive Disclosure
+
+Skills use a multi-level loading system to manage context efficiently:
+
+1. **Metadata** (name + description) - Always loaded for skill selection (~50-100 tokens)
+2. **SKILL.md body** - Loaded when skill is invoked or relevant
+3. **Bundled resources** - Loaded on-demand when referenced
+
+**Design principle**: Keep SKILL.md concise. The context window is shared with conversation history and other skills. Only include information that the agent doesn't already know.
+
+**For large skills**, split content into separate files:
+
+```
+my-skill/
+├── SKILL.md              # Core workflow and navigation
+├── references/
+│   ├── api-docs.md       # Detailed API documentation
+│   └── examples.md       # Extended examples
+└── scripts/
+    └── helper.py         # Reusable scripts
+```
+
+In SKILL.md, reference them with clear guidance:
+```markdown
+## Advanced Features
+
+- **API Reference**: See `references/api-docs.md` for complete method documentation
+- **Examples**: See `references/examples.md` for common patterns
+```
+
 ### Best Practices
 
-1. **Clear Instructions**: Write specific, actionable instructions
-2. **Examples**: Include usage examples in your skill
-3. **Requirements**: Specify binaries/env vars if needed
-4. **Versioning**: Update version when making changes
-5. **Tags**: Use descriptive tags for organization
-6. **Single Responsibility**: Each skill should do one thing well
+1. **Concise Instructions**: Keep SKILL.md under 500 lines; split larger content into references
+2. **Clear Triggers**: Write descriptions that help the agent know when to use the skill
+3. **Examples**: Include usage examples in your skill
+4. **Requirements**: Specify binaries/env vars if needed
+5. **Versioning**: Update version when making changes
+6. **Tags**: Use descriptive tags for organization
+7. **Single Responsibility**: Each skill should do one thing well
 
 ### Including Scripts
 
