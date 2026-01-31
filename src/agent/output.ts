@@ -120,7 +120,18 @@ export function createAgentOutput(params: {
       case "tool_execution_start":
         params.stderr.write(`${formatToolLine(event.toolName, event.args)}\n`);
         break;
+      case "tool_execution_update": {
+        // Show real-time output updates (e.g., from exec tool)
+        const updateText = extractText(event.partialResult);
+        if (updateText) {
+          // Clear line and show latest tail output
+          params.stderr.write(`\r\x1b[K  ↳ ${updateText.slice(-60).replace(/\n/g, " ")}`);
+        }
+        break;
+      }
       case "tool_execution_end":
+        // Clear any update line from tool_execution_update
+        params.stderr.write("\r\x1b[K");
         if (event.isError) {
           const errorText = extractText(event.result) || "Tool failed";
           params.stderr.write(`• Tool error (${toolDisplayName(event.toolName)}): ${errorText}\n`);

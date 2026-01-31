@@ -6,10 +6,11 @@ import {
   PROCESS_REGISTRY,
   registerProcess,
   cleanupTerminatedProcesses,
+  getFullOutput,
 } from "./process-registry.js";
 
 const ProcessSchema = Type.Object({
-  action: Type.String({ description: "Action: start | status | stop | output | cleanup." }),
+  action: Type.String({ description: "Action: list | start | status | stop | output | cleanup." }),
   id: Type.Optional(Type.String({ description: "Process id for status/stop/output." })),
   command: Type.Optional(Type.String({ description: "Command to run for start." })),
   cwd: Type.Optional(Type.String({ description: "Working directory." })),
@@ -27,7 +28,7 @@ export function createProcessTool(defaultCwd?: string): AgentTool<typeof Process
   return {
     name: "process",
     label: "Process",
-    description: "Manage long-running background processes like servers, watchers, or daemons. Actions: 'start' to launch (returns immediately with process id), 'status' to check if running, 'output' to read stdout/stderr, 'stop' to terminate, 'cleanup' to remove terminated processes from memory. Use this for servers (e.g., python server.py, npm run dev) instead of 'exec'.",
+    description: "Manage long-running background processes like servers, watchers, or daemons. Actions: 'list' to show all processes, 'start' to launch (returns immediately with process id), 'status' to check if running, 'output' to read stdout/stderr, 'stop' to terminate, 'cleanup' to remove terminated processes from memory. Use this for servers (e.g., python server.py, npm run dev) instead of 'exec'.",
     parameters: ProcessSchema,
     execute: async (_toolCallId, params, signal) => {
       // Auto-cleanup old terminated processes on each invocation
@@ -36,6 +37,41 @@ export function createProcessTool(defaultCwd?: string): AgentTool<typeof Process
       const action = String(params.action ?? "").toLowerCase();
       if (!action) {
         throw new Error("Missing action");
+      }
+
+      if (action === "list") {
+        const processes = Array.from(PROCESS_REGISTRY.values()).map((entry) => {
+          const running = entry.exitCode === null;
+          const durationMs = Date.now() - entry.startedAt;
+          const durationSec = (durationMs / 1000).toFixed(1);
+          return {
+            id: entry.id,
+            command: entry.command.length > 50 ? entry.command.slice(0, 47) + "..." : entry.command,
+            running,
+            exitCode: entry.exitCode,
+            duration: `${durationSec}s`,
+            source: entry.source,
+          };
+        });
+
+        if (processes.length === 0) {
+          return {
+            content: [{ type: "text", text: "No processes in registry." }],
+            details: { processes: [] },
+          };
+        }
+
+        const lines = processes.map((p) => {
+          const status = p.running ? "running" : `exited(${p.exitCode})`;
+          return `${p.id}  ${p.command.padEnd(50)}  ${status.padEnd(12)}  ${p.duration.padStart(8)}  [${p.source}]`;
+        });
+        const header = "ID".padEnd(36) + "  " + "COMMAND".padEnd(50) + "  " + "STATUS".padEnd(12) + "  " + "DURATION".padStart(8) + "  SOURCE";
+        const output = [header, "-".repeat(header.length), ...lines].join("\n");
+
+        return {
+          content: [{ type: "text", text: output }],
+          details: { processes },
+        };
       }
 
       if (action === "start") {
@@ -138,10 +174,10 @@ export function createProcessTool(defaultCwd?: string): AgentTool<typeof Process
             details: { id, running: false },
           };
         }
-        const output = entry.outputBuffer.join("");
+        const { output, truncated } = getFullOutput(entry);
         const running = entry.exitCode === null;
         return {
-          content: [{ type: "text", text: output || "(no output)" }],
+          content: [{ type: "text", text: (output || "(no output)") + (truncated ? "\n[output truncated]" : "") }],
           details: { id, running, exitCode: entry.exitCode, output },
         };
       }
