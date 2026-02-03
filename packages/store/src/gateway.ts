@@ -10,7 +10,6 @@ interface GatewayState {
   connectionState: ConnectionState
   hubId: string | null
   agentId: string | null
-  token: string | null
   hubs: DeviceInfo[]
   lastError: SendErrorResponse | null
 }
@@ -80,7 +79,6 @@ export const useGatewayStore = create<GatewayStore>()((set, get) => ({
   connectionState: "disconnected",
   hubId: null,
   agentId: null,
-  token: null,
   hubs: [],
   lastError: null,
 
@@ -103,7 +101,6 @@ export const useGatewayStore = create<GatewayStore>()((set, get) => ({
       gatewayUrl: code.gateway,
       hubId: code.hubId,
       agentId: code.agentId,
-      token: code.token,
     })
 
     client = createClient(code.gateway, deviceId, set)
@@ -115,7 +112,7 @@ export const useGatewayStore = create<GatewayStore>()((set, get) => ({
       client.disconnect()
       client = null
     }
-    set({ connectionState: "disconnected", hubId: null, agentId: null, token: null, hubs: [] })
+    set({ connectionState: "disconnected", hubId: null, agentId: null, hubs: [] })
   },
 
   setHubId: (hubId) => set({ hubId }),

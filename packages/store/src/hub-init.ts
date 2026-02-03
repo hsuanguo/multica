@@ -11,6 +11,7 @@ export function useHubInit() {
   const gwState = useGatewayStore((s) => s.connectionState)
   const hubId = useGatewayStore((s) => s.hubId)
   const agentId = useGatewayStore((s) => s.agentId)
+  const reset = useHubStore((s) => s.reset)
   const fetchHub = useHubStore((s) => s.fetchHub)
   const fetchAgents = useHubStore((s) => s.fetchAgents)
   const setActiveAgentId = useHubStore((s) => s.setActiveAgentId)
@@ -35,7 +36,7 @@ export function useHubInit() {
       }
     }
     if (gwState === "disconnected") {
-      useHubStore.setState({ status: "idle", hub: null, agents: [], activeAgentId: null })
+      reset()
     }
-  }, [gwState, hubId, agentId, fetchHub, fetchAgents, setActiveAgentId])
+  }, [gwState, hubId, agentId, reset, fetchHub, fetchAgents, setActiveAgentId])
 }

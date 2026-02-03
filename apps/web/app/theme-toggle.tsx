@@ -9,16 +9,14 @@ export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
 
   return (
-    <div className="fixed top-2 right-2 z-50">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        className="size-8 text-muted-foreground"
-      >
-        <HugeiconsIcon icon={Sun01Icon} strokeWidth={1.5} className="size-4 dark:hidden" />
-        <HugeiconsIcon icon={Moon01Icon} strokeWidth={1.5} className="size-4 hidden dark:block" />
-      </Button>
-    </div>
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      className="size-8 text-muted-foreground"
+    >
+      <HugeiconsIcon icon={Sun01Icon} strokeWidth={1.5} className="size-4 dark:hidden" />
+      <HugeiconsIcon icon={Moon01Icon} strokeWidth={1.5} className="size-4 hidden dark:block" />
+    </Button>
   );
 }

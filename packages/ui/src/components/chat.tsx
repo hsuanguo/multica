@@ -11,22 +11,15 @@ import {
   useHubStore,
   useMessagesStore,
   useGatewayStore,
-  useHubInit,
   useDeviceId,
   parseConnectionCode,
   saveConnection,
-  clearConnection,
 } from "@multica/store";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
 import { cn } from "@multica/ui/lib/utils";
 
-interface ChatProps {
-  showHeader?: boolean;
-}
-
-export function Chat({ showHeader = true }: ChatProps) {
-  useHubInit()
+export function Chat() {
   const deviceId = useDeviceId()
   const activeAgentId = useHubStore((s) => s.activeAgentId)
   const gwState = useGatewayStore((s) => s.connectionState)
@@ -41,7 +34,7 @@ export function Chat({ showHeader = true }: ChatProps) {
 
   const handleConnect = useCallback(() => {
     const trimmed = codeInput.trim()
-    if (!trimmed) return
+    if (!trimmed || !deviceId) return
     try {
       const info = parseConnectionCode(trimmed)
       saveConnection(info)
@@ -51,12 +44,6 @@ export function Chat({ showHeader = true }: ChatProps) {
       toast.error((e as Error).message)
     }
   }, [codeInput, deviceId])
-
-  const handleDisconnect = useCallback(() => {
-    useGatewayStore.getState().disconnect()
-    useHubStore.setState({ status: "idle", hub: null, agents: [], activeAgentId: null })
-    clearConnection()
-  }, [])
 
   const handleSend = useCallback((text: string) => {
     const { hubId } = useGatewayStore.getState()
@@ -72,33 +59,6 @@ export function Chat({ showHeader = true }: ChatProps) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden w-full">
-      {/* Header */}
-      {showHeader && (
-        <header>
-          <div className="flex items-center justify-between px-4 py-2 max-w-4xl mx-auto">
-            <div className="flex items-center gap-2.5">
-              <img src="/icon.png" alt="Multica" className="size-6 rounded-md" />
-              <span className="text-sm tracking-wide font-[family-name:var(--font-brand)]">
-                Multica
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              {isConnected && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleDisconnect}
-                  className="text-xs text-muted-foreground"
-                >
-                  Disconnect
-                </Button>
-              )}
-            </div>
-          </div>
-        </header>
-      )}
-
-      {/* Main */}
       <main ref={mainRef} className="flex-1 overflow-y-auto min-h-0" style={fadeStyle}>
         {!isConnected ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 px-4">

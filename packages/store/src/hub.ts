@@ -38,6 +38,7 @@ interface HubState {
 }
 
 interface HubActions {
+  reset: () => void
   setActiveAgentId: (id: string | null) => void
   fetchHub: () => Promise<void>
   fetchAgents: () => Promise<void>
@@ -53,6 +54,8 @@ export const useHubStore = create<HubStore>()((set, get) => ({
   hub: null,
   agents: [],
   activeAgentId: null,
+
+  reset: () => set({ status: "idle", hub: null, agents: [], activeAgentId: null }),
 
   setActiveAgentId: (id) => {
     set({ activeAgentId: id })
