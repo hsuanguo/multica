@@ -157,10 +157,13 @@ SCHEDULE TYPES (schedule.kind):
   { "kind": "cron", "expr": "0 9 * * *", "tz": "Asia/Shanghai" }
 
 PAYLOAD TYPES (payload.kind):
-- "system-event": Injects text as system event into session
+- "system-event": Injects text into main session (like a reminder, triggers main agent to respond)
   { "kind": "system-event", "text": "<message>" }
-- "agent-turn": Runs agent with message (isolated sessions only)
+- "agent-turn": Spawns an isolated agent that can use ALL tools (exec, write, web_fetch, etc.) to autonomously complete a task
   { "kind": "agent-turn", "message": "<prompt>", "timeoutSeconds": 300 }
+
+USE "agent-turn" when the job needs to perform actions (run commands, write files, fetch data, etc.).
+USE "system-event" when the job only needs to remind/notify the user in the current chat.
 
 CRITICAL CONSTRAINTS:
 - sessionTarget="main" REQUIRES payload.kind="system-event"
