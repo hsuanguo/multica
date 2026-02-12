@@ -29,7 +29,7 @@ const SessionsSpawnSchema = Type.Object({
   timeoutSeconds: Type.Optional(
     Type.Number({
       description:
-        "Execution timeout in seconds. Default: 600 (10 min). " +
+        "Execution timeout in seconds. Default: 1800 (30 min). " +
         "Set to 0 for no timeout (useful for complex, long-running tasks). " +
         "The subagent will be terminated if it exceeds this limit.",
       minimum: 0,

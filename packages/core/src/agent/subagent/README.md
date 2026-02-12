@@ -123,7 +123,7 @@ The subagent system allows a parent agent to spawn isolated child agents that ru
 | `announce.ts` | System prompt builder, findings reader, message formatter, delivery |
 | `announce-queue.ts` | Debounced queue for batching announcements when parent is busy |
 | `command-queue.ts` | Concurrency limiter for subagent lane slots |
-| `lanes.ts` | Lane config: max concurrency (10), default timeout (600s) |
+| `lanes.ts` | Lane config: max concurrency (10), default timeout (1800s) |
 | `types.ts` | Shared types: SubagentRunRecord, SubagentRunOutcome, etc. |
 | `registry-store.ts` | Persistence: save/load runs to disk for crash recovery |
 
@@ -159,10 +159,10 @@ Child run error (e.g., missing API key for provider)
 
 ## Timeout Behavior
 
-Default: 600s (10 min). System prompt guides the parent LLM:
-- Simple tasks: 600s (default)
-- Moderate tasks: 900-1200s (15-20 min)
-- Complex tasks: 1200-1800s (20-30 min)
+Default: 1800s (30 min). System prompt guides the parent LLM:
+- Simple tasks: 1800s (default)
+- Moderate tasks: 1800-2400s (30-40 min)
+- Complex tasks: 2400-3600s (40-60 min)
 
 On timeout:
 1. Timeout timer fires in `watchChildAgent()`

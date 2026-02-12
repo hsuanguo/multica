@@ -299,9 +299,9 @@ export function buildConditionalToolSections(
       "",
       "### Timeout Guidelines",
       "Set timeoutSeconds generously — a sub-agent that times out loses all its work.",
-      "- Simple tasks (search, read, summarize): 600 (10 min, the default)",
-      "- Moderate tasks (multi-step research, file downloads + analysis): 900–1200 (15–20 min)",
-      "- Complex tasks (code generation, PDF creation, multi-file operations): 1200–1800 (20–30 min)",
+      "- Simple tasks (search, read, summarize): 1800 (30 min, the default)",
+      "- Moderate tasks (multi-step research, file downloads + analysis): 1800–2400 (30–40 min)",
+      "- Complex tasks (code generation, PDF creation, multi-file operations): 2400–3600 (40–60 min)",
       "When in doubt, use a longer timeout.",
       "",
     );

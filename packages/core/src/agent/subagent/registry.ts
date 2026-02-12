@@ -273,7 +273,7 @@ function watchChildAgent(record: SubagentRunRecord, timeoutSeconds?: number): Pr
       resolveSlot(); // Release the queue slot
     };
 
-    // Always set a timeout (default 10 min, 0 = ~24 days via resolveSubagentTimeoutMs)
+    // Always set a timeout (default 30 min, 0 = ~24 days via resolveSubagentTimeoutMs)
     const timeoutTimer = setTimeout(() => {
       cleanup({ status: "timeout" });
 

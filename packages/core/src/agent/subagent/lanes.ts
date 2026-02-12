@@ -10,8 +10,8 @@ export const DEFAULT_SUBAGENT_MAX_CONCURRENT = 10;
 // Timeout defaults
 // ---------------------------------------------------------------------------
 
-/** Default subagent timeout: 10 minutes. */
-export const DEFAULT_SUBAGENT_TIMEOUT_SECONDS = 600;
+/** Default subagent timeout: 30 minutes. */
+export const DEFAULT_SUBAGENT_TIMEOUT_SECONDS = 1800;
 
 /** Maximum safe value for setTimeout (~24.8 days). */
 const MAX_SAFE_TIMEOUT_MS = 2_147_000_000;
@@ -19,7 +19,7 @@ const MAX_SAFE_TIMEOUT_MS = 2_147_000_000;
 /**
  * Resolve the effective timeout in milliseconds for a subagent run.
  *
- * - `undefined` / negative → default (600 s)
+ * - `undefined` / negative → default (1800 s)
  * - `0`                    → no timeout (MAX_SAFE_TIMEOUT_MS)
  * - positive number        → use as-is, clamped to safe range
  */
