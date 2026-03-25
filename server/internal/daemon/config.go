@@ -17,7 +17,7 @@ const (
 	DefaultDaemonConfigPath  = ".multica/daemon.json"
 	DefaultPollInterval      = 3 * time.Second
 	DefaultHeartbeatInterval = 15 * time.Second
-	DefaultAgentTimeout      = 20 * time.Minute
+	DefaultAgentTimeout      = 2 * time.Hour
 	DefaultRuntimeName       = "Local Agent"
 )
 
@@ -31,6 +31,8 @@ type Config struct {
 	RuntimeName       string
 	Agents            map[string]AgentEntry // "claude" -> entry, "codex" -> entry
 	ReposRoot         string                // parent directory containing all repos
+	WorkspacesRoot    string                // base path for execution envs (default: ~/multica_workspaces)
+	KeepEnvAfterTask  bool                  // preserve env after task for debugging
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
 	AgentTimeout      time.Duration
@@ -42,6 +44,7 @@ type Overrides struct {
 	ServerURL         string
 	WorkspaceID       string
 	ReposRoot         string
+	WorkspacesRoot    string
 	ConfigPath        string
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
@@ -172,6 +175,27 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		runtimeName = overrides.RuntimeName
 	}
 
+	// Workspaces root: override > env > default (~/multica_workspaces)
+	workspacesRoot := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
+	if overrides.WorkspacesRoot != "" {
+		workspacesRoot = overrides.WorkspacesRoot
+	}
+	if workspacesRoot == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			workspacesRoot = filepath.Join(home, "multica_workspaces")
+		} else {
+			workspacesRoot = filepath.Join(reposRoot, "multica_workspaces")
+		}
+	}
+	workspacesRoot, err = filepath.Abs(workspacesRoot)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve absolute workspaces root: %w", err)
+	}
+
+	// Keep env after task: env > default (false)
+	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
+
 	return Config{
 		ServerBaseURL:     serverBaseURL,
 		ConfigPath:        configPath,
@@ -181,6 +205,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		RuntimeName:       runtimeName,
 		Agents:            agents,
 		ReposRoot:         reposRoot,
+		WorkspacesRoot:    workspacesRoot,
+		KeepEnvAfterTask:  keepEnv,
 		PollInterval:      pollInterval,
 		HeartbeatInterval: heartbeatInterval,
 		AgentTimeout:      agentTimeout,

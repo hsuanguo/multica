@@ -18,17 +18,7 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 }
 
-func TestResolveTaskWorkdirReturnsRoot(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	got := ResolveTaskWorkdir(root)
-	if got != root {
-		t.Fatalf("expected %s, got %s", root, got)
-	}
-}
-
-func TestBuildPromptIncludesIssueAndSkills(t *testing.T) {
+func TestBuildPromptIncludesIssueAndContext(t *testing.T) {
 	t.Parallel()
 
 	prompt := BuildPrompt(Task{
@@ -37,19 +27,45 @@ func TestBuildPromptIncludesIssueAndSkills(t *testing.T) {
 				Title:              "Fix failing test",
 				Description:        "Investigate and fix the test failure.",
 				AcceptanceCriteria: []string{"tests pass"},
-				ContextRefs:        []string{"log snippet"},
 			},
 			Agent: AgentContext{
 				Name:   "Local Codex",
 				Skills: "Be concise.",
 			},
 		},
-	}, "/tmp/work")
+	})
 
-	for _, want := range []string{"Fix failing test", "Investigate and fix the test failure.", "tests pass", "log snippet", "Be concise."} {
+	for _, want := range []string{
+		"Fix failing test",
+		"Investigate and fix the test failure.",
+		"tests pass",
+		".agent_context/issue_context.md",
+	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q", want)
 		}
+	}
+}
+
+func TestBuildPromptTruncatesLongDescription(t *testing.T) {
+	t.Parallel()
+
+	longDesc := strings.Repeat("x", 300)
+	prompt := BuildPrompt(Task{
+		Context: TaskContext{
+			Issue: IssueContext{
+				Title:       "Long desc",
+				Description: longDesc,
+			},
+			Agent: AgentContext{Name: "Test"},
+		},
+	})
+
+	if strings.Contains(prompt, longDesc) {
+		t.Fatal("expected long description to be truncated in prompt")
+	}
+	if !strings.Contains(prompt, "...") {
+		t.Fatal("expected truncation marker")
 	}
 }
 

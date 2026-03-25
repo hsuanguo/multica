@@ -77,6 +77,8 @@ type RuntimeContext struct {
 
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
-	Status  string `json:"status"`
-	Comment string `json:"comment"`
+	Status     string `json:"status"`
+	Comment    string `json:"comment"`
+	BranchName string `json:"branch_name,omitempty"`
+	EnvType    string `json:"env_type,omitempty"`
 }

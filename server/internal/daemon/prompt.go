@@ -6,60 +6,41 @@ import (
 )
 
 // BuildPrompt constructs the task prompt for an agent CLI.
-func BuildPrompt(task Task, workdir string) string {
+// Full context is available in .agent_context/issue_context.md (written by execenv).
+// The prompt contains a brief summary for immediate context.
+func BuildPrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n")
-	b.WriteString("Complete the assigned issue using the local environment.\n")
-	b.WriteString("Return a concise Markdown comment suitable for posting back to the issue.\n")
-	b.WriteString("If you cannot complete the task because context, files, or permissions are missing, return status \"blocked\" and explain the blocker in the comment.\n\n")
+	b.WriteString("Complete the assigned issue using the local environment.\n\n")
 
-	fmt.Fprintf(&b, "Working directory: %s\n", workdir)
-	fmt.Fprintf(&b, "Agent: %s\n", task.Context.Agent.Name)
-	fmt.Fprintf(&b, "Issue title: %s\n\n", task.Context.Issue.Title)
+	b.WriteString("## Context\n\n")
+	b.WriteString("Full issue context is available in `.agent_context/issue_context.md` in your working directory.\n")
+	b.WriteString("Read this file first for the complete issue description, acceptance criteria, and instructions.\n\n")
+
+	fmt.Fprintf(&b, "**Issue:** %s\n", task.Context.Issue.Title)
+	fmt.Fprintf(&b, "**Agent:** %s\n\n", task.Context.Agent.Name)
 
 	if task.Context.Issue.Description != "" {
-		b.WriteString("Issue description:\n")
-		b.WriteString(task.Context.Issue.Description)
-		b.WriteString("\n\n")
+		desc := task.Context.Issue.Description
+		if len(desc) > 200 {
+			desc = desc[:200] + "..."
+		}
+		fmt.Fprintf(&b, "**Summary:** %s\n\n", desc)
 	}
 
 	if len(task.Context.Issue.AcceptanceCriteria) > 0 {
-		b.WriteString("Acceptance criteria:\n")
+		b.WriteString("## Acceptance Criteria\n\n")
 		for _, item := range task.Context.Issue.AcceptanceCriteria {
 			fmt.Fprintf(&b, "- %s\n", item)
 		}
 		b.WriteString("\n")
 	}
 
-	if len(task.Context.Issue.ContextRefs) > 0 {
-		b.WriteString("Context refs:\n")
-		for _, item := range task.Context.Issue.ContextRefs {
-			fmt.Fprintf(&b, "- %s\n", item)
-		}
-		b.WriteString("\n")
-	}
-
-	if task.Context.WorkspaceContext != "" {
-		b.WriteString("Workspace context:\n")
-		b.WriteString(task.Context.WorkspaceContext)
-		b.WriteString("\n\n")
-	}
-
-	if task.Context.Agent.Skills != "" {
-		b.WriteString("Agent skills/instructions:\n")
-		b.WriteString(task.Context.Agent.Skills)
-		b.WriteString("\n\n")
-	}
-
-	b.WriteString("Comment requirements:\n")
+	b.WriteString("## Output Requirements\n\n")
+	b.WriteString("Return a concise Markdown comment suitable for posting back to the issue.\n")
 	b.WriteString("- Lead with the outcome.\n")
 	b.WriteString("- Mention concrete files or commands if you changed anything.\n")
-	b.WriteString("- Mention blockers or follow-up actions if relevant.\n")
+	b.WriteString("- If blocked, explain the blocker clearly.\n")
 
 	return b.String()
-}
-
-// ResolveTaskWorkdir determines the working directory for a task.
-func ResolveTaskWorkdir(reposRoot string) string {
-	return reposRoot
 }

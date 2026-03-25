@@ -97,10 +97,12 @@ func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, ste
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), map[string]any{
-		"output": output,
-	}, nil)
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName string) error {
+	body := map[string]any{"output": output}
+	if branchName != "" {
+		body["branch_name"] = branchName
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil)
 }
 
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg string) error {
