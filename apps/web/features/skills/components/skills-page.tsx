@@ -11,6 +11,7 @@ import {
   FolderOpen,
   AlertCircle,
   X,
+  Download,
 } from "lucide-react";
 import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@/shared/types";
 import {
@@ -30,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -42,22 +44,47 @@ import { useWSEvent } from "@/features/realtime";
 function CreateSkillDialog({
   onClose,
   onCreate,
+  onImport,
 }: {
   onClose: () => void;
   onCreate: (data: CreateSkillRequest) => Promise<void>;
+  onImport: (url: string) => Promise<void>;
 }) {
+  const [tab, setTab] = useState<"create" | "import">("create");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [importError, setImportError] = useState("");
 
-  const handleSubmit = async () => {
+  const detectedSource = (() => {
+    const url = importUrl.trim().toLowerCase();
+    if (url.includes("clawhub.ai")) return "clawhub" as const;
+    if (url.includes("skills.sh")) return "skills.sh" as const;
+    return null;
+  })();
+
+  const handleCreate = async () => {
     if (!name.trim()) return;
-    setCreating(true);
+    setLoading(true);
     try {
       await onCreate({ name: name.trim(), description: description.trim() });
       onClose();
     } catch {
-      setCreating(false);
+      setLoading(false);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importUrl.trim()) return;
+    setLoading(true);
+    setImportError("");
+    try {
+      await onImport(importUrl.trim());
+      onClose();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+      setLoading(false);
     }
   };
 
@@ -65,42 +92,94 @@ function CreateSkillDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create Skill</DialogTitle>
+          <DialogTitle>Add Skill</DialogTitle>
           <DialogDescription>
-            Create a reusable skill that can be assigned to agents.
+            Create a new skill or import from ClawHub / Skills.sh.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div>
-            <Label className="text-xs text-muted-foreground">Name</Label>
-            <Input
-              autoFocus
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Code Review, Bug Triage"
-              className="mt-1"
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            />
-          </div>
-          <div>
-            <Label className="text-xs text-muted-foreground">Description</Label>
-            <Input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Brief description of what this skill does"
-              className="mt-1"
-            />
-          </div>
-        </div>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "create" | "import")}>
+          <TabsList className="w-full">
+            <TabsTrigger value="create" className="flex-1">
+              <Plus className="mr-1.5 h-3 w-3" />
+              Create
+            </TabsTrigger>
+            <TabsTrigger value="import" className="flex-1">
+              <Download className="mr-1.5 h-3 w-3" />
+              Import
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="create" className="space-y-4 mt-4">
+            <div>
+              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Input
+                autoFocus
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Code Review, Bug Triage"
+                className="mt-1"
+                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Description</Label>
+              <Input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Brief description of what this skill does"
+                className="mt-1"
+              />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="import" className="space-y-4 mt-4">
+            <div>
+              <Label className="text-xs text-muted-foreground">Skill URL</Label>
+              <Input
+                autoFocus
+                type="text"
+                value={importUrl}
+                onChange={(e) => { setImportUrl(e.target.value); setImportError(""); }}
+                placeholder="https://clawhub.ai/owner/skill-name"
+                className="mt-1"
+                onKeyDown={(e) => e.key === "Enter" && handleImport()}
+              />
+              <div className="flex items-center gap-2 mt-1.5">
+                {detectedSource ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-xs font-medium">
+                    {detectedSource === "clawhub" ? "ClawHub" : "Skills.sh"}
+                  </span>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Supports <span className="font-medium">clawhub.ai</span> and <span className="font-medium">skills.sh</span>
+                  </p>
+                )}
+              </div>
+            </div>
+            {importError && (
+              <div className="flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                {importError}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={creating || !name.trim()}>
-            {creating ? "Creating..." : "Create"}
-          </Button>
+          {tab === "create" ? (
+            <Button onClick={handleCreate} disabled={loading || !name.trim()}>
+              {loading ? "Creating..." : "Create"}
+            </Button>
+          ) : (
+            <Button onClick={handleImport} disabled={loading || !importUrl.trim()}>
+              <Download className="mr-1.5 h-3 w-3" />
+              {loading ? "Importing..." : "Import"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -453,6 +532,12 @@ export default function SkillsPage() {
     setSelectedId(skill.id);
   };
 
+  const handleImport = async (url: string) => {
+    const skill = await api.importSkill({ url });
+    upsertSkill(skill);
+    setSelectedId(skill.id);
+  };
+
   const handleUpdate = async (id: string, data: UpdateSkillRequest) => {
     const updated = await api.updateSkill(id, data);
     upsertSkill(updated);
@@ -561,6 +646,7 @@ export default function SkillsPage() {
         <CreateSkillDialog
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
+          onImport={handleImport}
         />
       )}
     </ResizablePanelGroup>
