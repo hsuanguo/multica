@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useActorName } from "@/features/workspace";
 import { timeAgo } from "@/shared/utils";
 import { RichTextEditor, type RichTextEditorRef } from "@/components/common/rich-text-editor";
+import { Markdown } from "@/components/markdown/Markdown";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { ReplyInput } from "./reply-input";
@@ -190,7 +191,7 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <RichTextEditor defaultValue={entry.content ?? ""} editable={false} />
+            <Markdown mode="minimal">{entry.content ?? ""}</Markdown>
           </div>
           {!isTemp && (
             <ReactionBar
@@ -387,7 +388,7 @@ function CommentCard({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <RichTextEditor defaultValue={entry.content ?? ""} editable={false} />
+                  <Markdown mode="minimal">{entry.content ?? ""}</Markdown>
                 </div>
                 {!isTemp && (
                   <ReactionBar
