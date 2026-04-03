@@ -323,6 +323,52 @@ func TestCommentTriggerOnMentionNoStatusGate(t *testing.T) {
 	}
 }
 
+// TestCommentTriggerThreadInheritedMention verifies that when a top-level
+// comment @mentions an agent (not the assignee), replies in that thread
+// also trigger the mentioned agent — even without explicitly re-mentioning it.
+func TestCommentTriggerThreadInheritedMention(t *testing.T) {
+	agentID := getAgentID(t)
+
+	// Create an issue NOT assigned to the agent, so on_comment won't fire.
+	issueID := createIssue(t, "Thread-inherited mention test")
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	t.Run("reply in thread inherits parent mention", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Top-level comment @mentions the agent.
+		content := fmt.Sprintf("[@Agent](mention://agent/%s) can you review this?", agentID)
+		threadID := postComment(t, issueID, content, nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Fatalf("expected 1 pending task after initial mention, got %d", n)
+		}
+		// Clear the task so we can test the reply independently.
+		clearTasks(t, issueID)
+		// Reply in the thread WITHOUT mentioning the agent.
+		postComment(t, issueID, "Here is more context for you", strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task from thread-inherited mention, got %d", n)
+		}
+	})
+
+	t.Run("reply does not double-trigger when re-mentioning same agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Top-level comment @mentions the agent.
+		content := fmt.Sprintf("[@Agent](mention://agent/%s) help", agentID)
+		threadID := postComment(t, issueID, content, nil)
+		clearTasks(t, issueID)
+		// Reply also @mentions the same agent — should still be just 1 task.
+		reply := fmt.Sprintf("[@Agent](mention://agent/%s) any update?", agentID)
+		postComment(t, issueID, reply, strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (no duplicate), got %d", n)
+		}
+	})
+}
+
 // TestCommentTriggerCoalescing verifies that rapid-fire comments don't create
 // duplicate tasks (coalescing dedup).
 func TestCommentTriggerCoalescing(t *testing.T) {

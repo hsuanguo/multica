@@ -188,7 +188,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
-	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, authorType, authorID)
+	// Pass parentComment so that replies inherit mentions from the thread root.
+	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -248,16 +249,34 @@ func (h *Handler) isReplyToMemberThread(parent *db.Comment, content string, issu
 }
 
 // enqueueMentionedAgentTasks parses @agent mentions from comment content and
-// enqueues a task for each mentioned agent. Skips self-mentions, agents that
-// are already the issue's assignee (handled by on_comment), agents with
-// on_mention trigger disabled, and private agents mentioned by non-owner
-// members (only the agent owner or workspace admin/owner can mention a
-// private agent).
+// enqueues a task for each mentioned agent. When parentComment is non-nil
+// (i.e. the comment is a reply), mentions from the parent (thread root) are
+// also included so that agents mentioned in the top-level comment are
+// re-triggered by subsequent replies in the same thread.
+// Skips self-mentions, agents that are already the issue's assignee (handled
+// by on_comment), agents with on_mention trigger disabled, and private agents
+// mentioned by non-owner members (only the agent owner or workspace
+// admin/owner can mention a private agent).
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, authorType, authorID string) {
+func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
+	// When replying in a thread, also include mentions from the parent comment
+	// so that agents mentioned in the thread root are triggered by replies.
+	if parentComment != nil {
+		parentMentions := util.ParseMentions(parentComment.Content)
+		seen := make(map[string]bool, len(mentions))
+		for _, m := range mentions {
+			seen[m.Type+":"+m.ID] = true
+		}
+		for _, m := range parentMentions {
+			if !seen[m.Type+":"+m.ID] {
+				mentions = append(mentions, m)
+				seen[m.Type+":"+m.ID] = true
+			}
+		}
+	}
 	for _, m := range mentions {
 		if m.Type != "agent" {
 			continue
