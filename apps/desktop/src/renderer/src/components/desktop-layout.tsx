@@ -5,9 +5,8 @@ import { useNavigationHistory } from "@/hooks/use-history-stack";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
 import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
-import { WorkspaceIdProvider } from "@multica/core/hooks";
 import { ModalRegistry } from "@multica/views/modals/registry";
-import { AppSidebar, useDashboardGuard } from "@multica/views/layout";
+import { AppSidebar, DashboardGuard } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { DesktopNavigationProvider } from "@/platform/navigation";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
@@ -73,47 +72,37 @@ function useInternalLinkHandler() {
 function DesktopLayoutInner() {
   useTabSync();
   useInternalLinkHandler();
-  const { user, isLoading, workspace } = useDashboardGuard("/login");
-
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
 
   return (
-    <div className="flex h-screen">
-      <SidebarProvider className="flex-1">
-        <AppSidebar topSlot={<SidebarTopBar />} searchSlot={<SearchTrigger />} />
-        {/* Right side: header + content container */}
-        <div className="flex flex-1 min-w-0 flex-col">
-          {/* Tab bar + drag region */}
-          <header
-            className="h-12 shrink-0"
-            style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-          >
-            <TabBar />
-          </header>
-          {/* Content area with inset styling */}
-          <div className="flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
-            {workspace ? (
-              <WorkspaceIdProvider wsId={workspace.id}>
-                <Outlet />
-                <ModalRegistry />
-                <SearchCommand />
-              </WorkspaceIdProvider>
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <MulticaIcon className="size-6 animate-pulse" />
-              </div>
-            )}
-          </div>
+    <DashboardGuard
+      loginPath="/login"
+      loadingFallback={
+        <div className="flex h-screen items-center justify-center">
+          <MulticaIcon className="size-6 animate-pulse" />
         </div>
-      </SidebarProvider>
-    </div>
+      }
+    >
+      <div className="flex h-screen">
+        <SidebarProvider className="flex-1">
+          <AppSidebar topSlot={<SidebarTopBar />} searchSlot={<SearchTrigger />} />
+          {/* Right side: header + content container */}
+          <div className="flex flex-1 min-w-0 flex-col">
+            {/* Tab bar + drag region */}
+            <header
+              className="h-12 shrink-0"
+              style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+            >
+              <TabBar />
+            </header>
+            {/* Content area with inset styling */}
+            <div className="flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
+              <Outlet />
+              <ModalRegistry />
+              <SearchCommand />
+            </div>
+          </div>
+        </SidebarProvider>
+      </div>
+    </DashboardGuard>
   );
 }
