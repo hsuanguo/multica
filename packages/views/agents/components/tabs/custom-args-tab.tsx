@@ -7,7 +7,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -29,9 +29,11 @@ function entriesToArgs(entries: ArgEntry[]): string[] {
 
 export function CustomArgsTab({
   agent,
+  runtimeDevice,
   onSave,
 }: {
   agent: Agent;
+  runtimeDevice?: RuntimeDevice;
   onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
   const [entries, setEntries] = useState<ArgEntry[]>(
@@ -69,6 +71,8 @@ export function CustomArgsTab({
     }
   };
 
+  const launchHeader = runtimeDevice?.launch_header;
+
   return (
     <div className="max-w-lg space-y-4">
       <div className="flex items-center justify-between">
@@ -80,6 +84,14 @@ export function CustomArgsTab({
             Additional CLI arguments appended to the agent command at launch
             (e.g. --model claude-sonnet-4-20250514)
           </p>
+          {launchHeader && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Launch mode:{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                {launchHeader} &lt;your args&gt;
+              </code>
+            </p>
+          )}
         </div>
         <Button
           type="button"
