@@ -4,6 +4,14 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+// "primary" is the default — agent runs in a fresh, empty workdir and uses
+// `multica repo checkout` to pull any code it needs.
+// "repo" binds the agent to a single workspace repository at creation time;
+// the daemon pre-clones that repo and spawns the agent with cwd set to the
+// repo root so native tools (Claude Code, etc.) auto-load the repo's own
+// CLAUDE.md / .claude/skills/. The binding is immutable.
+export type AgentType = "primary" | "repo";
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -55,6 +63,8 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
+  agent_type: AgentType;
+  repo_url: string | null;
   owner_id: string | null;
   skills: Skill[];
   created_at: string;
@@ -75,6 +85,10 @@ export interface CreateAgentRequest {
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   model?: string;
+  // Defaults to "primary" on the server when omitted. When set to "repo",
+  // repo_url is required and must match one of the workspace's registered repos.
+  agent_type?: AgentType;
+  repo_url?: string;
 }
 
 export interface UpdateAgentRequest {

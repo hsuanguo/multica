@@ -595,6 +595,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			CustomArgs:   customArgs,
 			McpConfig:    mcpConfig,
 			Model:        agent.Model.String,
+			Type:         agent.AgentType,
+			RepoURL:      agent.RepoUrl.String,
 		}
 	}
 

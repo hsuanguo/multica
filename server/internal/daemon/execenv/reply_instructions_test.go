@@ -44,7 +44,7 @@ func TestInjectRuntimeConfigCommentTriggerUsesHelper(t *testing.T) {
 		IssueID:          issueID,
 		TriggerCommentID: triggerID,
 	}
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "claude", false, ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 

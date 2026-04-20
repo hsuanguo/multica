@@ -39,6 +39,10 @@ type TaskContextForEnv struct {
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
 	ChatSessionID     string              // non-empty for chat tasks
+	// BoundRepoURL is set only for "repo" agents — the workspace repo the
+	// agent is bound to. When set, the task's cwd is the worktree root for
+	// this repo and the meta content avoids asking the agent to re-check it out.
+	BoundRepoURL string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
@@ -59,7 +63,16 @@ type Environment struct {
 	// RootDir is the top-level env directory ({workspacesRoot}/{task_id_short}/).
 	RootDir string
 	// WorkDir is the directory to pass as Cwd to the agent ({RootDir}/workdir/).
+	// For primary agents this is the cwd; for repo agents the cwd is the
+	// pre-cloned worktree root and WorkDir is still used as scratch space and
+	// as the storage location for the prior-workdir pointer.
 	WorkDir string
+	// HomeDir is a per-task $HOME override ({RootDir}/home/). Used for repo
+	// agents so Multica's injected context (CLAUDE.md, .claude/skills/) lives
+	// outside the repo worktree — letting the agent's native tool discover
+	// Multica's context via user-scope while the repo's own project-scope
+	// config stays authoritative. Empty for primary agents.
+	HomeDir string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 
@@ -91,7 +104,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	// Create directory tree.
 	workDir := filepath.Join(envRoot, "workdir")
-	for _, dir := range []string{workDir, filepath.Join(envRoot, "output"), filepath.Join(envRoot, "logs")} {
+	homeDir := filepath.Join(envRoot, "home")
+	for _, dir := range []string{workDir, homeDir, filepath.Join(envRoot, "output"), filepath.Join(envRoot, "logs")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
@@ -100,11 +114,21 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	env := &Environment{
 		RootDir: envRoot,
 		WorkDir: workDir,
+		HomeDir: homeDir,
 		logger:  logger,
 	}
 
-	// Write context files into workdir (skills go to provider-native paths).
-	if err := writeContextFiles(workDir, params.Provider, params.Task); err != nil {
+	// For repo agents, context lives under the per-task HOME so it does not
+	// pollute the repo worktree; primary agents keep today's behavior
+	// (context inside the workdir).
+	contextDir := workDir
+	if params.Task.BoundRepoURL != "" {
+		contextDir = homeDir
+	}
+
+	// Write context files into the chosen context directory (skills go to
+	// provider-native paths within it).
+	if err := writeContextFiles(contextDir, params.Provider, params.Task); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
@@ -137,14 +161,28 @@ func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logge
 		return nil
 	}
 
+	envRoot := filepath.Dir(workDir)
+	homeDir := filepath.Join(envRoot, "home")
+	// The home dir may not exist for environments prepared before repo agents
+	// shipped — recreate it so Reuse works the same for both types.
+	if err := os.MkdirAll(homeDir, 0o755); err != nil {
+		logger.Warn("execenv: ensure home dir failed", "error", err)
+	}
+
 	env := &Environment{
-		RootDir: filepath.Dir(workDir),
+		RootDir: envRoot,
 		WorkDir: workDir,
+		HomeDir: homeDir,
 		logger:  logger,
 	}
 
+	contextDir := workDir
+	if task.BoundRepoURL != "" {
+		contextDir = homeDir
+	}
+
 	// Refresh context files (issue_context.md, skills).
-	if err := writeContextFiles(workDir, provider, task); err != nil {
+	if err := writeContextFiles(contextDir, provider, task); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
 

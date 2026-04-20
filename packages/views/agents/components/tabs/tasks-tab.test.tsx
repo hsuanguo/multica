@@ -62,6 +62,8 @@ const agent: Agent = {
   updated_at: "2026-04-16T00:00:00Z",
   archived_at: null,
   archived_by: null,
+  agent_type: "primary",
+  repo_url: null,
 };
 
 function renderTasksTab(tasks: AgentTask[], issues: Issue[]) {

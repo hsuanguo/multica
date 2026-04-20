@@ -958,16 +958,28 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	var agentID string
 	var skills []SkillData
 	var instructions string
+	var agentType string
+	var boundRepoURL string
 	if task.Agent != nil {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
+		agentType = task.Agent.Type
+		boundRepoURL = task.Agent.RepoURL
+	}
+
+	// Fail fast: a repo agent without a RepoURL cannot be executed — the
+	// schema constraint should already prevent this but treat it as a hard
+	// error rather than silently degrading to primary-agent behavior.
+	if agentType == "repo" && boundRepoURL == "" {
+		return TaskResult{}, fmt.Errorf("repo agent %q has no repo_url", agentName)
 	}
 
 	// Prepare isolated execution environment.
-	// Repos are passed as metadata only — the agent checks them out on demand
-	// via `multica repo checkout <url>`.
+	// For primary agents: workdir starts empty and the agent uses `multica repo checkout`.
+	// For repo agents: workdir is still scratch space, but the daemon also
+	// pre-clones the bound repo below so the agent's cwd = worktree root.
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:           task.IssueID,
 		TriggerCommentID:  task.TriggerCommentID,
@@ -977,6 +989,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentSkills:       convertSkillsForEnv(skills),
 		Repos:             convertReposForEnv(task.Repos),
 		ChatSessionID:     task.ChatSessionID,
+		BoundRepoURL:      boundRepoURL,
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
@@ -1001,8 +1014,35 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 	}
 
+	// For repo agents: pre-clone the bound repo and set cwd = worktree root
+	// so the native agent tool (e.g. Claude Code) auto-loads the repo's own
+	// CLAUDE.md / .claude/skills/. Multica's runtime context lives under the
+	// per-task HOME so it doesn't pollute the worktree.
+	cwd := env.WorkDir
+	contextDir := env.WorkDir
+	userScope := false
+	if agentType == "repo" {
+		if err := d.ensureRepoReady(ctx, task.WorkspaceID, boundRepoURL); err != nil {
+			return TaskResult{}, fmt.Errorf("ensure repo ready: %w", err)
+		}
+		wt, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
+			WorkspaceID: task.WorkspaceID,
+			RepoURL:     boundRepoURL,
+			WorkDir:     env.WorkDir,
+			AgentName:   agentName,
+			TaskID:      task.ID,
+		})
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("pre-clone repo %s: %w", boundRepoURL, err)
+		}
+		cwd = wt.Path
+		contextDir = env.HomeDir
+		userScope = true
+		taskLog.Info("repo agent pre-cloned", "repo", boundRepoURL, "cwd", cwd, "branch", wt.BranchName)
+	}
+
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
+	if err := execenv.InjectRuntimeConfig(contextDir, provider, userScope, taskCtx); err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
@@ -1034,6 +1074,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	// For repo agents: override HOME so Multica's injected CLAUDE.md and
+	// .claude/skills/ land at user-scope without touching the repo worktree.
+	// Seed the override HOME with symlinks to the real user's auth files so
+	// the agent can still authenticate against Claude / other providers.
+	if agentType == "repo" && env.HomeDir != "" {
+		if err := seedRepoAgentHome(env.HomeDir); err != nil {
+			d.logger.Warn("seed repo agent HOME failed (non-fatal)", "error", err)
+		}
+		agentEnv["HOME"] = env.HomeDir
 	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
@@ -1094,7 +1144,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		model = entry.Model
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:             env.WorkDir,
+		Cwd:             cwd,
 		Model:           model,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
@@ -1406,6 +1456,53 @@ func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 		info[i] = repocache.RepoInfo{URL: r.URL, Description: r.Description}
 	}
 	return info
+}
+
+// seedRepoAgentHome populates a per-task HOME override with symlinks back to
+// the real user's Claude config files so a repo-mode agent can still authenticate
+// after we redirect HOME. We intentionally symlink rather than copy so token
+// refreshes performed by the agent still persist to the user's real home.
+//
+// Only known auth/settings files are linked; we do not expose the entire real
+// ~ to the agent. If the user's real HOME can't be determined, this is a
+// no-op — HOME override still works, just without auth (which will surface
+// as a clear auth error from the provider rather than a silent failure).
+func seedRepoAgentHome(overrideHome string) error {
+	realHome, err := os.UserHomeDir()
+	if err != nil || realHome == "" || realHome == overrideHome {
+		return nil
+	}
+	claudeDir := filepath.Join(overrideHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir override .claude: %w", err)
+	}
+	// Files Claude Code reads from ~/.claude/. Missing ones are skipped
+	// silently — different auth flows populate different subsets.
+	for _, name := range []string{".credentials.json", "settings.json", "statsig"} {
+		src := filepath.Join(realHome, ".claude", name)
+		if _, err := os.Lstat(src); err != nil {
+			continue
+		}
+		dst := filepath.Join(claudeDir, name)
+		if _, err := os.Lstat(dst); err == nil {
+			continue
+		}
+		if err := os.Symlink(src, dst); err != nil {
+			return fmt.Errorf("symlink %s: %w", name, err)
+		}
+	}
+	// The top-level ~/.claude.json stores MCP server state + recent projects
+	// and is also consulted by the CLI. Link it when present.
+	topConfig := filepath.Join(realHome, ".claude.json")
+	if _, err := os.Lstat(topConfig); err == nil {
+		dst := filepath.Join(overrideHome, ".claude.json")
+		if _, err := os.Lstat(dst); err != nil {
+			if err := os.Symlink(topConfig, dst); err != nil {
+				return fmt.Errorf("symlink .claude.json: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {

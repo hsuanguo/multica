@@ -144,7 +144,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// Inject runtime config (done separately in daemon, replicate here).
-	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", false, taskCtx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -366,7 +366,7 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		},
 	}
 
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "claude", false, ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -399,7 +399,7 @@ func TestInjectRuntimeConfigGemini(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Writing", Content: "Write clearly."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "gemini", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "gemini", false, ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -437,7 +437,7 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "codex", false, ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -461,7 +461,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 
 	ctx := TaskContextForEnv{IssueID: "test-issue-id"}
 
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "claude", false, ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -588,7 +588,7 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "opencode", false, ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -638,7 +638,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	if err := InjectRuntimeConfig(env.WorkDir, "opencode", taskCtx); err != nil {
+	if err := InjectRuntimeConfig(env.WorkDir, "opencode", false, taskCtx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -695,7 +695,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			if err := InjectRuntimeConfig(dir, "claude", tc.ctx); err != nil {
+			if err := InjectRuntimeConfig(dir, "claude", false, tc.ctx); err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
 			data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
@@ -736,7 +736,7 @@ func TestInjectRuntimeConfigUnknownProvider(t *testing.T) {
 	dir := t.TempDir()
 
 	// Unknown provider should be a no-op.
-	if err := InjectRuntimeConfig(dir, "unknown", TaskContextForEnv{}); err != nil {
+	if err := InjectRuntimeConfig(dir, "unknown", false, TaskContextForEnv{}); err != nil {
 		t.Fatalf("expected no error for unknown provider, got: %v", err)
 	}
 
@@ -1283,5 +1283,171 @@ func TestReadGCMeta_NoFile(t *testing.T) {
 	_, err := ReadGCMeta(dir)
 	if err == nil {
 		t.Fatal("expected error for missing file")
+	}
+}
+
+// With userScope=true, Claude's meta file must land at .claude/CLAUDE.md so
+// it merges as a user-scope config when HOME points at contextDir — leaving
+// the repo's own top-level CLAUDE.md authoritative for project scope.
+func TestInjectRuntimeConfigClaudeUserScope(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	if err := InjectRuntimeConfig(dir, "claude", true, TaskContextForEnv{IssueID: "iss-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+
+	userScoped := filepath.Join(dir, ".claude", "CLAUDE.md")
+	if _, err := os.Stat(userScoped); err != nil {
+		t.Fatalf("expected %s to exist: %v", userScoped, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Error("user-scope claude must not create top-level CLAUDE.md")
+	}
+}
+
+// Default (userScope=false) preserves the original behavior: CLAUDE.md at
+// the contextDir root. Guards against accidental regression for primary agents.
+func TestInjectRuntimeConfigClaudeProjectScope(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	if err := InjectRuntimeConfig(dir, "claude", false, TaskContextForEnv{IssueID: "iss-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
+		t.Fatalf("project-scope claude missing top-level CLAUDE.md: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Error("project-scope claude must not create .claude/CLAUDE.md")
+	}
+}
+
+// Repo-agent meta content must frame the agent as already-checked-out and
+// exclude the bound repo from the auxiliary repos list.
+func TestBuildMetaSkillContentRepoAgentFraming(t *testing.T) {
+	t.Parallel()
+
+	bound := "https://github.com/acme/widgets.git"
+	content := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:      "iss-1",
+		BoundRepoURL: bound,
+		Repos: []RepoContextForEnv{
+			{URL: bound, Description: "main app"},
+			{URL: "https://github.com/acme/shared.git", Description: "shared libs"},
+		},
+	})
+
+	if !strings.Contains(content, "already checked out at the root of `"+bound+"`") {
+		t.Error("missing bound-repo framing")
+	}
+	if !strings.Contains(content, "Do NOT run `multica repo checkout` for this repo") {
+		t.Error("missing self-checkout warning")
+	}
+	if !strings.Contains(content, "## Other Repositories") {
+		t.Error("repo agent should use 'Other Repositories' heading")
+	}
+	if strings.Contains(content, "| "+bound+" |") {
+		t.Error("bound repo should be filtered out of the repos table")
+	}
+	if !strings.Contains(content, "acme/shared.git") {
+		t.Error("non-bound workspace repos should still be listed")
+	}
+}
+
+// Primary-agent meta content keeps the legacy "## Repositories" section and
+// contains no repo-agent framing.
+func TestBuildMetaSkillContentPrimaryAgentUnchanged(t *testing.T) {
+	t.Parallel()
+
+	content := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID: "iss-1",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/acme/widgets.git", Description: "main app"},
+		},
+	})
+
+	if strings.Contains(content, "already checked out at the root of") {
+		t.Error("primary agent must not include bound-repo framing")
+	}
+	if strings.Contains(content, "## Other Repositories") {
+		t.Error("primary agent must not use 'Other Repositories' heading")
+	}
+	if !strings.Contains(content, "## Repositories") {
+		t.Error("primary agent should keep the full 'Repositories' heading")
+	}
+}
+
+// For repo agents (BoundRepoURL set), Prepare must route Multica's injected
+// context into HomeDir, leaving the WorkDir clean for the worktree clone.
+func TestPrepareRepoAgentRoutesContextToHome(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: root,
+		WorkspaceID:    "ws-1",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "repo-agent",
+		Provider:       "claude",
+		Task: TaskContextForEnv{
+			IssueID:      "iss-1",
+			BoundRepoURL: "https://github.com/acme/widgets.git",
+			AgentSkills: []SkillContextForEnv{
+				{Name: "Skill One", Content: "do things"},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if env.HomeDir == "" {
+		t.Fatal("HomeDir must be set")
+	}
+
+	// Skills live under HomeDir/.claude/skills/, never under WorkDir.
+	if _, err := os.Stat(filepath.Join(env.HomeDir, ".claude", "skills", "skill-one", "SKILL.md")); err != nil {
+		t.Errorf("skill missing under HomeDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".claude", "skills", "skill-one")); !os.IsNotExist(err) {
+		t.Error("skill must not be written under WorkDir for repo agents")
+	}
+	// issue_context.md is also routed to HomeDir.
+	if _, err := os.Stat(filepath.Join(env.HomeDir, ".agent_context", "issue_context.md")); err != nil {
+		t.Errorf("issue_context.md missing under HomeDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".agent_context", "issue_context.md")); !os.IsNotExist(err) {
+		t.Error("issue_context.md must not be written under WorkDir for repo agents")
+	}
+}
+
+// Primary agents (no BoundRepoURL) must continue writing context to WorkDir —
+// regression guard for the legacy behavior.
+func TestPreparePrimaryAgentKeepsContextInWorkDir(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: root,
+		WorkspaceID:    "ws-1",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "primary-agent",
+		Provider:       "claude",
+		Task: TaskContextForEnv{
+			IssueID: "iss-1",
+			AgentSkills: []SkillContextForEnv{
+				{Name: "Skill One", Content: "do things"},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".claude", "skills", "skill-one", "SKILL.md")); err != nil {
+		t.Errorf("primary agent skill missing under WorkDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.HomeDir, ".claude", "skills", "skill-one")); !os.IsNotExist(err) {
+		t.Error("primary agent skill must not be written under HomeDir")
 	}
 }

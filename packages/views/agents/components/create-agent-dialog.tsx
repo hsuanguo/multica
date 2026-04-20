@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Cloud, ChevronDown, Globe, Lock, Loader2 } from "lucide-react";
+import { Cloud, ChevronDown, Globe, Lock, Loader2, Bot, GitBranch } from "lucide-react";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ModelDropdown } from "./model-dropdown";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
+  AgentType,
   AgentVisibility,
   RuntimeDevice,
   MemberWithUser,
@@ -46,10 +48,15 @@ export function CreateAgentDialog({
   onClose: () => void;
   onCreate: (data: CreateAgentRequest) => Promise<void>;
 }) {
+  const workspace = useCurrentWorkspace();
+  const workspaceRepos = workspace?.repos ?? [];
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
   const [model, setModel] = useState("");
+  const [agentType, setAgentType] = useState<AgentType>("primary");
+  const [repoUrl, setRepoUrl] = useState<string>("");
+  const [repoOpen, setRepoOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
@@ -84,6 +91,10 @@ export function CreateAgentDialog({
 
   const handleSubmit = async () => {
     if (!name.trim() || !selectedRuntime) return;
+    if (agentType === "repo" && !repoUrl) {
+      toast.error("Select a repository for this repo agent");
+      return;
+    }
     setCreating(true);
     try {
       await onCreate({
@@ -92,6 +103,8 @@ export function CreateAgentDialog({
         runtime_id: selectedRuntime.id,
         visibility,
         model: model.trim() || undefined,
+        agent_type: agentType,
+        repo_url: agentType === "repo" ? repoUrl : undefined,
       });
       onClose();
     } catch (err) {
@@ -170,6 +183,88 @@ export function CreateAgentDialog({
               </button>
             </div>
           </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground">Type</Label>
+            <div className="mt-1.5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setAgentType("primary"); setRepoUrl(""); }}
+                className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                  agentType === "primary"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <div className="text-left">
+                  <div className="font-medium">Primary</div>
+                  <div className="text-xs text-muted-foreground">Fresh workdir; agent checks out repos on demand</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAgentType("repo")}
+                className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                  agentType === "repo"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <div className="text-left">
+                  <div className="font-medium">Repo</div>
+                  <div className="text-xs text-muted-foreground">Bound to one repo; cwd = repo root</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {agentType === "repo" && (
+            <div className="min-w-0">
+              <Label className="text-xs text-muted-foreground">Repository</Label>
+              <Popover open={repoOpen} onOpenChange={setRepoOpen}>
+                <PopoverTrigger
+                  disabled={workspaceRepos.length === 0}
+                  className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">
+                      {repoUrl || (workspaceRepos.length === 0
+                        ? "No repositories configured"
+                        : "Select a repository")}
+                    </div>
+                    {workspaceRepos.length === 0 && (
+                      <div className="truncate text-xs text-muted-foreground">
+                        Add repos in Workspace settings first
+                      </div>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${repoOpen ? "rotate-180" : ""}`} />
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-[var(--anchor-width)] p-1 max-h-60 overflow-y-auto">
+                  {workspaceRepos.map((repo) => (
+                    <button
+                      key={repo.url}
+                      onClick={() => { setRepoUrl(repo.url); setRepoOpen(false); }}
+                      className={`flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                        repo.url === repoUrl ? "bg-accent" : "hover:bg-accent/50"
+                      }`}
+                    >
+                      <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{repo.url}</div>
+                        {repo.description && (
+                          <div className="truncate text-xs text-muted-foreground">{repo.description}</div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
 
           <div className="min-w-0">
             <div className="flex items-center justify-between">
@@ -294,7 +389,12 @@ export function CreateAgentDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={creating || !name.trim() || !selectedRuntime}
+            disabled={
+              creating ||
+              !name.trim() ||
+              !selectedRuntime ||
+              (agentType === "repo" && !repoUrl)
+            }
           >
             {creating ? "Creating..." : "Create"}
           </Button>

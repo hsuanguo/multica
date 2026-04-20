@@ -8,6 +8,8 @@ import {
   Lock,
   Camera,
   ChevronDown,
+  Bot,
+  GitBranch,
 } from "lucide-react";
 import type { Agent, AgentVisibility, RuntimeDevice, MemberWithUser } from "@multica/core/types";
 import {
@@ -205,6 +207,32 @@ export function SettingsTab({
             </div>
           </button>
         </div>
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Type</Label>
+        <div className="mt-1.5 flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-sm">
+          {agent.agent_type === "repo" ? (
+            <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+          ) : (
+            <Bot className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="font-medium capitalize">{agent.agent_type}</div>
+            {agent.agent_type === "repo" && agent.repo_url ? (
+              <div className="truncate text-xs text-muted-foreground" title={agent.repo_url}>
+                {agent.repo_url}
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                Fresh workdir; agent checks out repos on demand
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Agent type is set at creation and can&apos;t be changed. To switch types, archive this agent and create a new one.
+        </p>
       </div>
 
       <div>

@@ -1,0 +1,3 @@
+ALTER TABLE agent DROP CONSTRAINT IF EXISTS agent_repo_url_matches_type;
+ALTER TABLE agent DROP COLUMN IF EXISTS repo_url;
+ALTER TABLE agent DROP COLUMN IF EXISTS agent_type;

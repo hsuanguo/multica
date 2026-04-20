@@ -230,6 +230,95 @@ func newTestDaemon(t *testing.T) *Daemon {
 	}
 }
 
+// seedRepoAgentHome is a daemon helper that symlinks Claude auth files from
+// the real user HOME into a per-task HOME override. Point HOME at a tempdir
+// so the test doesn't leak from the invoker's real home.
+func TestSeedRepoAgentHomeSymlinksAuthFiles(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	realHome := t.TempDir()
+	t.Setenv("HOME", realHome)
+
+	// Seed a realistic set of Claude auth artifacts.
+	claudeDir := filepath.Join(realHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir real .claude: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"x"}`), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realHome, ".claude.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write top .claude.json: %v", err)
+	}
+
+	override := t.TempDir()
+	if err := seedRepoAgentHome(override); err != nil {
+		t.Fatalf("seedRepoAgentHome: %v", err)
+	}
+
+	for _, rel := range []string{".claude/.credentials.json", ".claude/settings.json", ".claude.json"} {
+		linkPath := filepath.Join(override, rel)
+		info, err := os.Lstat(linkPath)
+		if err != nil {
+			t.Fatalf("expected symlink at %s: %v", linkPath, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s should be a symlink, got mode %v", linkPath, info.Mode())
+		}
+	}
+	// statsig was not present in realHome; must not materialize under override.
+	if _, err := os.Lstat(filepath.Join(override, ".claude", "statsig")); !os.IsNotExist(err) {
+		t.Errorf("statsig must be skipped when source is missing, got err=%v", err)
+	}
+}
+
+// When override HOME equals real HOME, seeding is a no-op — guards against
+// symlink self-loops that would create dangling or circular entries.
+func TestSeedRepoAgentHomeNoopWhenHomeMatches(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := seedRepoAgentHome(home); err != nil {
+		t.Fatalf("seedRepoAgentHome: %v", err)
+	}
+	// The override .claude dir must NOT be created when src == dst.
+	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
+		t.Error("seedRepoAgentHome must be a no-op when override HOME == real HOME")
+	}
+}
+
+// Repo agents without a repo_url must fail fast before any env setup — the
+// DB CHECK constraint already forbids this, so this is a defense-in-depth
+// guard against a corrupted claim payload.
+func TestRunTaskRepoAgentMissingRepoURL(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg = Config{
+		Agents:         map[string]AgentEntry{"claude": {Path: "/does/not/matter"}},
+		WorkspacesRoot: t.TempDir(),
+	}
+
+	_, err := d.runTask(context.Background(), Task{
+		ID:          "11111111-2222-3333-4444-555555555555",
+		WorkspaceID: "ws-1",
+		IssueID:     "iss-1",
+		Agent: &AgentData{
+			Name:    "repo-bot",
+			Type:    "repo",
+			RepoURL: "", // intentionally missing
+		},
+	}, "claude", slog.Default())
+
+	if err == nil || !strings.Contains(err.Error(), "has no repo_url") {
+		t.Fatalf("expected 'has no repo_url' error, got %v", err)
+	}
+}
+
 func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	t.Helper()
 	srv := httptest.NewServer(handler)

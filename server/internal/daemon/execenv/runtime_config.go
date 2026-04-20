@@ -10,24 +10,33 @@ import (
 // InjectRuntimeConfig writes the meta skill content into the runtime-specific
 // config file so the agent discovers its environment through its native mechanism.
 //
-// For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
-// For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
-// For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
-// For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
-// For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from .openclaw/skills/)
-// For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
-// For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from ~/.pi/agent/skills/)
-// For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
-func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
+// contextDir is the directory receiving Multica's injected context file. For
+// primary agents it's the task workdir (project-scope). For repo agents
+// (cwd = repo root, HOME = contextDir) it's the per-task HOME override so the
+// context lands at user-scope — which lets the repo's own project-level
+// CLAUDE.md remain authoritative while Multica's runtime still loads.
+//
+// userScope switches the target file into the provider's user-scope layout
+// (currently only meaningful for Claude: `{contextDir}/.claude/CLAUDE.md`
+// instead of `{contextDir}/CLAUDE.md`).
+func InjectRuntimeConfig(contextDir, provider string, userScope bool, ctx TaskContextForEnv) error {
 	content := buildMetaSkillContent(provider, ctx)
 
 	switch provider {
 	case "claude":
-		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
+		path := filepath.Join(contextDir, "CLAUDE.md")
+		if userScope {
+			dir := filepath.Join(contextDir, ".claude")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			path = filepath.Join(dir, "CLAUDE.md")
+		}
+		return os.WriteFile(path, []byte(content), 0o644)
 	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor":
-		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
+		return os.WriteFile(filepath.Join(contextDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
-		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
+		return os.WriteFile(filepath.Join(contextDir, "GEMINI.md"), []byte(content), 0o644)
 	default:
 		// Unknown provider — skip config injection, prompt-only mode.
 		return nil
@@ -41,6 +50,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+
+	// Repo agents run with cwd = the bound repo's worktree root, so the repo's
+	// own CLAUDE.md / AGENTS.md and project skills (.claude/skills/, etc.) are
+	// authoritative for this task. The runtime context still applies — the
+	// agent just shouldn't re-check out its own repo.
+	if ctx.BoundRepoURL != "" {
+		b.WriteString("## Working Directory\n\n")
+		fmt.Fprintf(&b, "You are already checked out at the root of `%s`. Project-level guidance (CLAUDE.md, AGENTS.md, skills) in this repo is authoritative; this document is the shared Multica runtime layer on top.\n\n", ctx.BoundRepoURL)
+		b.WriteString("Do NOT run `multica repo checkout` for this repo — it is already set up. If you need code from a _different_ workspace repo, check that out into a sibling directory.\n\n")
+	}
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.
@@ -93,14 +112,32 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
 	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
 
-	// Inject available repositories section.
-	if len(ctx.Repos) > 0 {
-		b.WriteString("## Repositories\n\n")
-		b.WriteString("The following code repositories are available in this workspace.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
+	// Inject available repositories section. For repo agents, the bound repo
+	// is already the working directory, so list only the _other_ workspace
+	// repos as additional options.
+	listedRepos := ctx.Repos
+	if ctx.BoundRepoURL != "" {
+		filtered := make([]RepoContextForEnv, 0, len(ctx.Repos))
+		for _, r := range ctx.Repos {
+			if r.URL == ctx.BoundRepoURL {
+				continue
+			}
+			filtered = append(filtered, r)
+		}
+		listedRepos = filtered
+	}
+	if len(listedRepos) > 0 {
+		if ctx.BoundRepoURL != "" {
+			b.WriteString("## Other Repositories\n\n")
+			b.WriteString("In addition to your bound repo (already checked out), these other workspace repos are available via `multica repo checkout <url>`.\n\n")
+		} else {
+			b.WriteString("## Repositories\n\n")
+			b.WriteString("The following code repositories are available in this workspace.\n")
+			b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
+		}
 		b.WriteString("| URL | Description |\n")
 		b.WriteString("|-----|-------------|\n")
-		for _, repo := range ctx.Repos {
+		for _, repo := range listedRepos {
 			desc := repo.Description
 			if desc == "" {
 				desc = "—"

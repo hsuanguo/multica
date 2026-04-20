@@ -1,6 +1,6 @@
 "use client";
 
-import { Cloud, Monitor } from "lucide-react";
+import { Cloud, Monitor, GitBranch } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { statusConfig } from "../config";
@@ -29,6 +29,15 @@ export function AgentListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className={`truncate text-sm font-medium ${isArchived ? "text-muted-foreground" : ""}`}>{agent.name}</span>
+          {agent.agent_type === "repo" && (
+            <span
+              className="flex shrink-0 items-center gap-1 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info"
+              title={agent.repo_url ?? undefined}
+            >
+              <GitBranch className="h-3 w-3" />
+              Repo
+            </span>
+          )}
           {agent.runtime_mode === "cloud" ? (
             <Cloud className="h-3 w-3 text-muted-foreground" />
           ) : (

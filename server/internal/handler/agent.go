@@ -37,6 +37,8 @@ type AgentResponse struct {
 	Status             string            `json:"status"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
+	AgentType          string            `json:"agent_type"`
+	RepoURL            *string           `json:"repo_url"`
 	OwnerID            *string           `json:"owner_id"`
 	Skills             []SkillResponse   `json:"skills"`
 	CreatedAt          string            `json:"created_at"`
@@ -96,6 +98,8 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
+		AgentType:          a.AgentType,
+		RepoURL:            textToPtr(a.RepoUrl),
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []SkillResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -147,6 +151,13 @@ type TaskAgentData struct {
 	CustomArgs   []string                 `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
 	Model        string                   `json:"model,omitempty"`
+	// Type is "primary" (default) or "repo". Repo agents are pre-cloned
+	// by the daemon and spawned with cwd = worktree root so native tools
+	// (e.g. Claude Code) auto-load the repo's own CLAUDE.md / .claude/skills/.
+	Type string `json:"type,omitempty"`
+	// RepoURL is set only for Type == "repo" and identifies the workspace
+	// repo bound to this agent at creation time.
+	RepoURL string `json:"repo_url,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -269,6 +280,8 @@ type CreateAgentRequest struct {
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
+	AgentType          string            `json:"agent_type"`
+	RepoURL            string            `json:"repo_url"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -321,6 +334,48 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.MaxConcurrentTasks == 0 {
 		req.MaxConcurrentTasks = 6
 	}
+	if req.AgentType == "" {
+		req.AgentType = "primary"
+	}
+	switch req.AgentType {
+	case "primary":
+		if req.RepoURL != "" {
+			writeError(w, http.StatusBadRequest, "primary agents cannot have a repo_url")
+			return
+		}
+	case "repo":
+		if req.RepoURL == "" {
+			writeError(w, http.StatusBadRequest, "repo agents require a repo_url")
+			return
+		}
+		// The repo_url must be one of the workspace's registered repos —
+		// otherwise the daemon has nothing to pre-clone.
+		ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load workspace")
+			return
+		}
+		var wsRepos []struct {
+			URL string `json:"url"`
+		}
+		if ws.Repos != nil {
+			_ = json.Unmarshal(ws.Repos, &wsRepos)
+		}
+		found := false
+		for _, r := range wsRepos {
+			if r.URL == req.RepoURL {
+				found = true
+				break
+			}
+		}
+		if !found {
+			writeError(w, http.StatusBadRequest, "repo_url is not a registered workspace repository")
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "agent_type must be 'primary' or 'repo'")
+		return
+	}
 
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID:          parseUUID(req.RuntimeID),
@@ -367,6 +422,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomArgs:         ca,
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		AgentType:          req.AgentType,
+		RepoUrl:            pgtype.Text{String: req.RepoURL, Valid: req.RepoURL != ""},
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -473,6 +530,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// agent_type and repo_url are immutable after creation. Rather than add
+	// reconfiguration semantics (which would need to cancel in-flight tasks,
+	// invalidate cached worktrees, and coordinate with the daemon), we force
+	// the user to archive + recreate. Reject any attempt to change them.
+	if _, ok := rawFields["agent_type"]; ok {
+		writeError(w, http.StatusBadRequest, "agent_type is immutable; archive and recreate the agent instead")
+		return
+	}
+	if _, ok := rawFields["repo_url"]; ok {
+		writeError(w, http.StatusBadRequest, "repo_url is immutable; archive and recreate the agent instead")
 		return
 	}
 

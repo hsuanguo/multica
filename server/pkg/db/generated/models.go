@@ -41,6 +41,8 @@ type Agent struct {
 	CustomArgs         []byte             `json:"custom_args"`
 	McpConfig          []byte             `json:"mcp_config"`
 	Model              pgtype.Text        `json:"model"`
+	AgentType          string             `json:"agent_type"`
+	RepoUrl            pgtype.Text        `json:"repo_url"`
 }
 
 type AgentRuntime struct {

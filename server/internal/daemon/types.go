@@ -50,6 +50,13 @@ type AgentData struct {
 	CustomArgs   []string          `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
 	Model        string            `json:"model,omitempty"`
+	// Type is "primary" or "repo". Repo agents are pre-cloned by the daemon
+	// and run with cwd = worktree root (so Claude Code auto-loads the repo's
+	// own CLAUDE.md / .claude/skills/). Empty defaults to primary.
+	Type string `json:"type,omitempty"`
+	// RepoURL is set when Type == "repo" and names the workspace repo
+	// the agent is bound to.
+	RepoURL string `json:"repo_url,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.
