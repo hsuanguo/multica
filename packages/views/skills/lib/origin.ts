@@ -1,25 +1,39 @@
 import type { Skill } from "@multica/core/types";
 
 /**
- * Discriminated view over `Skill.config.origin` — the JSONB blob the backend
- * writes when a skill was imported from outside (local runtime, ClawHub,
- * Skills.sh). Manual creates have no origin, so we synthesize `{ type:
- * "manual" }` for them to keep the consumer code uniform.
- *
- * NOTE: the backend currently only writes `runtime_local` origins. URL
- * imports leave `config.origin` empty, so `clawhub`/`skills_sh` variants are
- * declared here for forward compatibility but should never be rendered in
- * the UI until the server fills them in.
+ * Discriminated view over skill provenance: `Skill.source` / `source_metadata`
+ * (repo sync, marketplace) plus legacy `Skill.config.origin` for local runtime
+ * imports. Manual creates have no origin, so we synthesize `{ type: "manual"
+ * }` when neither applies.
  */
 export type OriginInfo = {
-  type: "runtime_local" | "clawhub" | "skills_sh" | "manual";
+  type: "runtime_local" | "clawhub" | "skills_sh" | "manual" | "repo";
   provider?: string;
   runtime_id?: string;
   source_path?: string;
   source_url?: string;
+  /** When `type === "repo"`, canonical repo URL from `source_metadata`. */
+  repo_url?: string;
+  branch?: string;
+  path?: string;
 };
 
 export function readOrigin(skill: Skill): OriginInfo {
+  if (skill.source === "repo") {
+    const meta = skill.source_metadata ?? {};
+    return {
+      type: "repo",
+      repo_url: typeof meta.repo_url === "string" ? meta.repo_url : undefined,
+      branch: typeof meta.branch === "string" ? meta.branch : undefined,
+      path: typeof meta.path === "string" ? meta.path : undefined,
+    };
+  }
+  if (skill.source === "clawhub") {
+    return { type: "clawhub" };
+  }
+  if (skill.source === "skills_sh") {
+    return { type: "skills_sh" };
+  }
   const raw = (skill.config?.origin ?? null) as
     | (OriginInfo & Record<string, unknown>)
     | null;

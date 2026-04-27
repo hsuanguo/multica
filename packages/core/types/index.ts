@@ -14,6 +14,7 @@ export type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  SyncRepoSkillsResponse,
   RuntimeUsage,
   RuntimeHourlyActivity,
   RuntimeUpdate,

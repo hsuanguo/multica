@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import type { Skill } from "@multica/core/types";
-import { canEditSkill } from "./use-can-edit-skill";
+import {
+  canEditSkill,
+  canEditSkillContent,
+  canManageWorkspaceSkill,
+} from "./use-can-edit-skill";
 
 function makeSkill(createdBy: string | null): Skill {
   return {
@@ -62,5 +66,19 @@ describe("canEditSkill", () => {
     expect(
       canEditSkill(skill, { userId: null, role: "member" }),
     ).toBe(false);
+  });
+
+  it("denies editing repo-synced skills even for owners (detach first)", () => {
+    const repoSkill: Skill = { ...skill, source: "repo" };
+    expect(
+      canEditSkillContent(repoSkill, { userId: "user-bob", role: "owner" }),
+    ).toBe(false);
+  });
+
+  it("still allows owners to manage repo-synced skills (delete / detach)", () => {
+    const repoSkill: Skill = { ...skill, source: "repo" };
+    expect(
+      canManageWorkspaceSkill(repoSkill, { userId: "user-bob", role: "owner" }),
+    ).toBe(true);
   });
 });

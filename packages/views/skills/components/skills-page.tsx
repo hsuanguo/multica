@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Download,
   FileText,
+  GitBranch,
   HardDrive,
   Lock,
   Pencil,
@@ -44,11 +45,20 @@ import {
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
-import { canEditSkill } from "../hooks/use-can-edit-skill";
+import { canEditSkillContent } from "../hooks/use-can-edit-skill";
 import { readOrigin, totalFileCount } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
+
+type SourceFilterKey = "all_sources" | "repository" | "external" | "custom";
+
+function skillSourceCategory(skill: Skill): "repository" | "external" | "custom" {
+  const s = skill.source ?? "manual";
+  if (s === "repo") return "repository";
+  if (s === "clawhub" || s === "skills_sh" || s === "github") return "external";
+  return "custom";
+}
 
 // ---------------------------------------------------------------------------
 // Source cell — "Source · Added by" column (order matches column header).
@@ -80,6 +90,14 @@ function SourceCell({
   } else if (origin.type === "skills_sh") {
     icon = <Download className="h-3 w-3 shrink-0" />;
     label = "From Skills.sh";
+  } else if (origin.type === "repo") {
+    icon = <GitBranch className="h-3 w-3 shrink-0" />;
+    try {
+      const u = origin.repo_url ? new URL(origin.repo_url) : null;
+      label = u ? `From repo · ${u.pathname.replace(/^\//, "")}` : "From repository";
+    } catch {
+      label = "From repository";
+    }
   }
 
   return (
@@ -156,16 +174,19 @@ function SkillRow({
   agents,
   creator,
   runtime,
-  canEdit,
+  canEditContent,
   href,
 }: {
   skill: Skill;
   agents: Agent[];
   creator: MemberWithUser | null;
   runtime: AgentRuntime | null;
-  canEdit: boolean;
+  canEditContent: boolean;
   href: string;
 }) {
+  const origin = readOrigin(skill);
+  const isRepo = origin.type === "repo";
+
   return (
     <AppLink
       href={href}
@@ -174,7 +195,12 @@ function SkillRow({
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{skill.name}</span>
-          {!canEdit && (
+          {isRepo && (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-px text-[10px] font-medium uppercase text-muted-foreground">
+              Repo
+            </span>
+          )}
+          {!canEditContent && (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -182,7 +208,9 @@ function SkillRow({
                 }
               />
               <TooltipContent>
-                Read-only — only creator or admin can edit
+                {isRepo
+                  ? "Read-only — synced from a repository (detach on the skill page to edit)"
+                  : "Read-only — only creator or admin can edit"}
               </TooltipContent>
             </Tooltip>
           )}
@@ -275,49 +303,92 @@ function PageHeaderBar({
 // PageHeader instead.
 // ---------------------------------------------------------------------------
 
+const SOURCE_FILTERS: {
+  value: SourceFilterKey;
+  label: string;
+  description: string;
+}[] = [
+  { value: "all_sources", label: "All sources", description: "Every provenance" },
+  { value: "repository", label: "Repository", description: "Synced from a workspace GitHub repo" },
+  { value: "external", label: "External", description: "ClawHub, Skills.sh, or GitHub import" },
+  { value: "custom", label: "Custom", description: "Created manually or from a local runtime" },
+];
+
 function CardToolbar({
   search,
   setSearch,
   filter,
   setFilter,
+  sourceFilter,
+  setSourceFilter,
 }: {
   search: string;
   setSearch: (v: string) => void;
   filter: FilterKey;
   setFilter: (v: FilterKey) => void;
+  sourceFilter: SourceFilterKey;
+  setSourceFilter: (v: SourceFilterKey) => void;
 }) {
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search skills…"
-          className="h-8 w-64 pl-8 text-sm"
-        />
-      </div>
-      {SCOPES.map((s) => (
-        <Tooltip key={s.value}>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="outline"
-                size="sm"
-                className={
-                  filter === s.value
-                    ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                    : "text-muted-foreground"
-                }
-                onClick={() => setFilter(s.value)}
-              >
-                {s.label}
-              </Button>
-            }
+    <div className="flex min-h-12 shrink-0 flex-col gap-2 border-b px-4 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search skills…"
+            className="h-8 w-64 pl-8 text-sm"
           />
-          <TooltipContent side="bottom">{s.description}</TooltipContent>
-        </Tooltip>
-      ))}
+        </div>
+        {SCOPES.map((s) => (
+          <Tooltip key={s.value}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={
+                    filter === s.value
+                      ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                      : "text-muted-foreground"
+                  }
+                  onClick={() => setFilter(s.value)}
+                >
+                  {s.label}
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">{s.description}</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="pr-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Source
+        </span>
+        {SOURCE_FILTERS.map((s) => (
+          <Tooltip key={s.value}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`h-7 text-xs ${
+                    sourceFilter === s.value
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground"
+                  }`}
+                  onClick={() => setSourceFilter(s.value)}
+                >
+                  {s.label}
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">{s.description}</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
     </div>
   );
 }
@@ -373,6 +444,7 @@ export default function SkillsPage() {
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilterKey>("all_sources");
   const [createOpen, setCreateOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -406,19 +478,23 @@ export default function SkillsPage() {
       (assignments.get(s.id)?.length ?? 0) > 0;
 
     return skills.filter((s) => {
-      if (
-        q &&
-        !s.name.toLowerCase().includes(q) &&
-        !s.description.toLowerCase().includes(q)
-      ) {
+      const name = (s.name ?? "").toLowerCase();
+      const desc = (s.description ?? "").toLowerCase();
+      if (q && !name.includes(q) && !desc.includes(q)) {
         return false;
       }
       if (filter === "used" && !byAssignment(s)) return false;
       if (filter === "unused" && byAssignment(s)) return false;
       if (filter === "mine" && s.created_by !== currentUserId) return false;
+      if (sourceFilter !== "all_sources") {
+        const cat = skillSourceCategory(s);
+        if (sourceFilter === "repository" && cat !== "repository") return false;
+        if (sourceFilter === "external" && cat !== "external") return false;
+        if (sourceFilter === "custom" && cat !== "custom") return false;
+      }
       return true;
     });
-  }, [skills, assignments, search, filter, currentUserId]);
+  }, [skills, assignments, search, filter, sourceFilter, currentUserId]);
 
   const handleCreated = (skill: Skill) => {
     navigation.push(paths.skillDetail(skill.id));
@@ -547,6 +623,8 @@ export default function SkillsPage() {
               setSearch={setSearch}
               filter={filter}
               setFilter={setFilter}
+              sourceFilter={sourceFilter}
+              setSourceFilter={setSourceFilter}
             />
             {filtered.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
@@ -585,7 +663,7 @@ export default function SkillsPage() {
                               : null
                           }
                           runtime={runtime}
-                          canEdit={canEditSkill(skill, {
+                          canEditContent={canEditSkillContent(skill, {
                             userId: currentUserId,
                             role: myRole,
                           })}

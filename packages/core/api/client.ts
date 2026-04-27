@@ -27,6 +27,7 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  SyncRepoSkillsResponse,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -834,6 +835,23 @@ export class ApiClient {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async syncRepoSkills(
+    data: { repo_url: string; confirm_overwrite_manual?: boolean },
+    opts?: { dryRun?: boolean },
+  ): Promise<SyncRepoSkillsResponse> {
+    const q = opts?.dryRun ? "?dry_run=1" : "";
+    return this.fetch(`/api/skills/sync-repo${q}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async detachSkillFromRepo(skillId: string): Promise<Skill> {
+    return this.fetch(`/api/skills/${skillId}/detach-repo`, {
+      method: "POST",
     });
   }
 

@@ -18,12 +18,13 @@ Most of the time you want **workspace skills**: import once, every teammate's ag
 
 ## Importing a skill
 
-Workspace skills come from four sources:
+Workspace skills come from five sources:
 
 - **New** — write the `SKILL.md` and related files directly in the UI
 - **From GitHub** — paste a repo URL (e.g. `https://github.com/owner/repo/tree/main/skills/my-skill`) and Multica pulls the `SKILL.md` and every file in that directory
 - **From ClawHub** — search and import from the [ClawHub](https://clawhub.io) public marketplace, with version selection
 - **From local** — the daemon scans skill directories on your machine, and you pick which to bring into the workspace
+- **From workspace repository** — in **Settings → Repositories**, use **Sync skills** on a saved GitHub repository. Multica scans conventional skill paths (`.claude/skills`, `.cursor/skills`, `.openclaw/skills`, `.gemini/skills`, `.agent/skills`, and others) on the default branch and upserts them as workspace skills tagged with provenance so agents receive them on the next task (same injection path as other workspace skills). v1 supports **github.com** URLs only; run a dry-run preview before applying, and confirm when existing skills with the same name would be overwritten.
 
 Both individual files and whole skill packs have size caps (single-file cap around 1 MB when importing from GitHub). The exact rules appear in the import dialog — exceeding them returns an error.
 

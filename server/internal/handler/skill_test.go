@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
@@ -465,4 +466,21 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestSanitizeSkillTextForPostgres(t *testing.T) {
+	if got := sanitizeSkillTextForPostgres("hello"); got != "hello" {
+		t.Fatalf("ascii unchanged: %q", got)
+	}
+	if got := sanitizeSkillTextForPostgres("a\x00b"); got != "ab" {
+		t.Fatalf("nul stripped: %q", got)
+	}
+	in := "x\xff\xfez"
+	got := sanitizeSkillTextForPostgres(in)
+	if strings.ContainsRune(got, '\x00') {
+		t.Fatal("still has nul")
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("invalid utf8 remains: %q", got)
+	}
 }

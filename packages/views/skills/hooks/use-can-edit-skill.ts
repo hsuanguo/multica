@@ -26,17 +26,35 @@ export function useCanEditSkill(
 
   if (!skill) return false;
   const myRole = members.find((m) => m.user_id === userId)?.role ?? null;
-  return canEditSkill(skill, { userId, role: myRole });
+  return canEditSkillContent(skill, { userId, role: myRole });
 }
 
 /**
  * Non-hook variant for places that already have the role + userId at hand
  * (e.g. list rows that compute role once for the whole page).
  */
-export function canEditSkill(
+/** Admin/owner or skill creator — matches server `canManageSkill` (without HTTP). */
+export function canManageWorkspaceSkill(
   skill: Skill,
   opts: { userId: string | null; role: MemberRole | null },
 ): boolean {
   if (opts.role === "admin" || opts.role === "owner") return true;
   return skill.created_by === opts.userId;
+}
+
+/** Whether the user may change skill body/files (repo-synced skills are read-only until detached). */
+export function canEditSkillContent(
+  skill: Skill,
+  opts: { userId: string | null; role: MemberRole | null },
+): boolean {
+  if (skill.source === "repo") return false;
+  return canManageWorkspaceSkill(skill, opts);
+}
+
+/** @deprecated Use `canEditSkillContent` — kept as alias for call sites that mean "edit body". */
+export function canEditSkill(
+  skill: Skill,
+  opts: { userId: string | null; role: MemberRole | null },
+): boolean {
+  return canEditSkillContent(skill, opts);
 }

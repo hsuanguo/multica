@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   ChevronRight,
+  GitBranch,
   HardDrive,
   Loader2,
   Lock,
@@ -26,6 +27,7 @@ import type {
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
 import { timeAgo } from "@multica/core/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -57,7 +59,10 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { AppLink, useNavigation } from "../../navigation";
-import { useCanEditSkill } from "../hooks/use-can-edit-skill";
+import {
+  useCanEditSkill,
+  canManageWorkspaceSkill,
+} from "../hooks/use-can-edit-skill";
 import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
@@ -185,18 +190,23 @@ function OriginSidebarCard({
   if (origin.type === "manual") return null;
 
   const isRuntime = origin.type === "runtime_local";
+  const isRepo = origin.type === "repo";
   const label =
     origin.type === "runtime_local"
       ? "Imported from local runtime"
-      : origin.type === "clawhub"
-        ? "Imported from ClawHub"
-        : "Imported from Skills.sh";
+      : origin.type === "repo"
+        ? "Synced from repository"
+        : origin.type === "clawhub"
+          ? "Imported from ClawHub"
+          : "Imported from Skills.sh";
 
   return (
     <div className="rounded-md border bg-muted/30 p-3">
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         {isRuntime ? (
           <HardDrive className="h-3 w-3" />
+        ) : isRepo ? (
+          <GitBranch className="h-3 w-3" />
         ) : (
           <Sparkles className="h-3 w-3" />
         )}
@@ -222,6 +232,21 @@ function OriginSidebarCard({
           provider · {origin.provider}
         </div>
       )}
+      {isRepo && origin.repo_url && (
+        <div className="mt-1 break-all font-mono text-xs text-foreground">
+          {origin.repo_url}
+        </div>
+      )}
+      {isRepo && origin.branch && (
+        <div className="mt-1 font-mono text-xs text-muted-foreground">
+          branch · {origin.branch}
+        </div>
+      )}
+      {isRepo && origin.path && (
+        <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+          path · {origin.path}
+        </div>
+      )}
     </div>
   );
 }
@@ -235,6 +260,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
   const {
     data: skill,
@@ -260,6 +286,21 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
   const canEdit = useCanEditSkill(skill, wsId);
 
+  const myRole = useMemo(
+    () => members.find((m) => m.user_id === currentUserId)?.role ?? null,
+    [members, currentUserId],
+  );
+  const canManage = useMemo(
+    () =>
+      skill
+        ? canManageWorkspaceSkill(skill, {
+            userId: currentUserId,
+            role: myRole,
+          })
+        : false,
+    [skill, currentUserId, myRole],
+  );
+
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [content, setContent] = useState("");
@@ -267,6 +308,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [selectedPath, setSelectedPath] = useState(SKILL_MD);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [detaching, setDetaching] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [addingFile, setAddingFile] = useState(false);
   // When a WS refetch lands newer server state while we have in-progress
@@ -472,6 +514,30 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     }
   };
 
+  const handleDetach = async () => {
+    if (!skill) return;
+    setDetaching(true);
+    try {
+      const updated = await api.detachSkillFromRepo(skill.id);
+      qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, updated);
+      seedFromSkill(updated);
+      seededKeyRef.current = `${wsId}:${updated.id}@${updated.updated_at}`;
+      setConflictPending(false);
+      qc.invalidateQueries({
+        queryKey: workspaceKeys.skills(wsId),
+        exact: true,
+      });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success("Detached — you can edit this skill in the workspace");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to detach skill",
+      );
+    } finally {
+      setDetaching(false);
+    }
+  };
+
   const handleAddFile = (path: string) => {
     setFiles((prev) => [...prev, { path, content: "" }]);
     setSelectedPath(path);
@@ -561,6 +627,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     }
     if (origin.type === "clawhub") return "Imported · ClawHub";
     if (origin.type === "skills_sh") return "Imported · Skills.sh";
+    if (origin.type === "repo") {
+      const br = origin.branch ? ` · ${origin.branch}` : "";
+      return `Repository${br}`;
+    }
     return "Workspace";
   })();
 
@@ -587,7 +657,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               Read-only
             </span>
           )}
-          {canEdit && (
+          {canManage && (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -720,6 +790,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 <span className="inline-flex items-center gap-1">
                   {origin?.type === "runtime_local" ? (
                     <HardDrive className="h-3 w-3" />
+                  ) : origin?.type === "repo" ? (
+                    <GitBranch className="h-3 w-3" />
                   ) : (
                     <Sparkles className="h-3 w-3" />
                   )}
@@ -868,6 +940,25 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 Origin
               </h3>
               <OriginSidebarCard origin={origin} runtime={originRuntime} />
+              {origin.type === "repo" && canManage && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 w-full text-xs"
+                  disabled={detaching}
+                  onClick={() => void handleDetach()}
+                >
+                  {detaching ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Detaching…
+                    </>
+                  ) : (
+                    "Detach from repository"
+                  )}
+                </Button>
+              )}
             </div>
           )}
 
@@ -884,9 +975,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               Permissions
             </h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              {canEdit
-                ? "You can edit and delete this skill. Changes take effect on the next agent run."
-                : `Only the creator${creator ? ` (${creator.name})` : ""} or a workspace admin can edit this skill.`}
+              {skill.source === "repo"
+                ? canManage
+                  ? "Synced from a GitHub repository. Detach to edit independently; re-sync from workspace settings overwrites content."
+                  : "Synced from a repository. Only the creator or a workspace admin can detach or delete it."
+                : canEdit
+                  ? "You can edit and delete this skill. Changes take effect on the next agent run."
+                  : `Only the creator${creator ? ` (${creator.name})` : ""} or a workspace admin can edit this skill.`}
             </p>
           </div>
         </aside>

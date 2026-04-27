@@ -104,6 +104,31 @@ export interface UpdateAgentRequest {
 
 // Skills
 
+/** Persisted provenance for a workspace skill (server column `skill.source`). */
+export type SkillSource =
+  | "manual"
+  | "repo"
+  | "clawhub"
+  | "skills_sh"
+  | "github";
+
+export interface SyncRepoSkillsResponse {
+  error?: string;
+  /** When set, GitHub listing failed anonymously — sync returns 200 with zero imports. */
+  github_notice?: string;
+  dry_run: boolean;
+  created: { id?: string; name: string }[];
+  updated: { id: string; name: string }[];
+  overwritten_manual: {
+    id: string;
+    name: string;
+    previous_source: string;
+  }[];
+  orphaned: { id: string; name: string }[];
+  skipped?: string[];
+  need_confirm_overwrite?: boolean;
+}
+
 export interface Skill {
   id: string;
   workspace_id: string;
@@ -111,10 +136,14 @@ export interface Skill {
   description: string;
   content: string;
   config: Record<string, unknown>;
-  files: SkillFile[];
+  /** Present on `getSkill`; list endpoint may omit. */
+  files?: SkillFile[];
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  source?: SkillSource;
+  source_metadata?: Record<string, unknown>;
+  synced_at?: string | null;
 }
 
 export interface SkillFile {

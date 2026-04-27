@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -20,15 +21,18 @@ import (
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Content     string  `json:"content"`
-	Config      any     `json:"config"`
-	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID             string  `json:"id"`
+	WorkspaceID    string  `json:"workspace_id"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	Content        string  `json:"content"`
+	Config         any     `json:"config"`
+	CreatedBy      *string `json:"created_by"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
+	Source         string  `json:"source,omitempty"`
+	SourceMetadata any     `json:"source_metadata,omitempty"`
+	SyncedAt       *string `json:"synced_at,omitempty"`
 }
 
 type SkillFileResponse struct {
@@ -54,16 +58,38 @@ func skillToResponse(s db.Skill) SkillResponse {
 		config = map[string]any{}
 	}
 
+	var meta any
+	if len(s.SourceMetadata) > 0 {
+		json.Unmarshal(s.SourceMetadata, &meta)
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+
+	source := s.Source
+	if source == "" {
+		source = "manual"
+	}
+
+	var synced *string
+	if s.SyncedAt.Valid {
+		t := timestampToString(s.SyncedAt)
+		synced = &t
+	}
+
 	return SkillResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		Name:        s.Name,
-		Description: s.Description,
-		Content:     s.Content,
-		Config:      config,
-		CreatedBy:   uuidToPtr(s.CreatedBy),
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:             uuidToString(s.ID),
+		WorkspaceID:    uuidToString(s.WorkspaceID),
+		Name:           s.Name,
+		Description:    s.Description,
+		Content:        s.Content,
+		Config:         config,
+		CreatedBy:      uuidToPtr(s.CreatedBy),
+		CreatedAt:      timestampToString(s.CreatedAt),
+		UpdatedAt:      timestampToString(s.UpdatedAt),
+		Source:         source,
+		SourceMetadata: meta,
+		SyncedAt:       synced,
 	}
 }
 
@@ -257,6 +283,10 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	if !h.canManageSkill(w, r, skill) {
 		return
 	}
+	if skill.Source == "repo" {
+		writeError(w, http.StatusForbidden, "skills synced from a repository cannot be edited here; detach first or re-sync from settings")
+		return
+	}
 
 	var req UpdateSkillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -268,6 +298,25 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		if !validateFilePath(f.Path) {
 			writeError(w, http.StatusBadRequest, "invalid file path: "+f.Path)
 			return
+		}
+	}
+
+	if req.Name != nil {
+		v := sanitizeSkillTextForPostgres(*req.Name)
+		req.Name = &v
+	}
+	if req.Description != nil {
+		v := sanitizeSkillTextForPostgres(*req.Description)
+		req.Description = &v
+	}
+	if req.Content != nil {
+		v := sanitizeSkillTextForPostgres(*req.Content)
+		req.Content = &v
+	}
+	if req.Files != nil {
+		for i := range req.Files {
+			req.Files[i].Path = sanitizeSkillTextForPostgres(req.Files[i].Path)
+			req.Files[i].Content = sanitizeSkillTextForPostgres(req.Files[i].Content)
 		}
 	}
 
@@ -911,6 +960,27 @@ func extractSkillMdPaths(entries []githubTreeEntry) []string {
 	return paths
 }
 
+// fetchGitHubRecursiveTree returns the full recursive git tree for ref (branch
+// name or commit SHA). One API call vs hundreds of /contents/ walks — avoids
+// GitHub HTTP 429 on large repos (e.g. many skills under skills/).
+func fetchGitHubRecursiveTree(httpClient *http.Client, owner, repo, ref string) (*githubTreeResponse, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(ref))
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	var tree githubTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		return nil, err
+	}
+	return &tree, nil
+}
+
 func partitionSkillMdPaths(skillName string, skillPaths []string) (preferred []string, remaining []string) {
 	for _, skillPath := range skillPaths {
 		if isLikelySkillPathMatch(skillName, skillPath) {
@@ -1001,6 +1071,19 @@ func parseSkillFrontmatter(content string) (name, description string) {
 
 // --- Shared helpers ---
 
+// sanitizeSkillTextForPostgres strips NUL bytes and fixes invalid UTF-8 so
+// strings are safe for PostgreSQL UTF-8 text columns (SQLSTATE 22021).
+func sanitizeSkillTextForPostgres(s string) string {
+	if s == "" {
+		return s
+	}
+	if strings.IndexByte(s, 0) < 0 && utf8.ValidString(s) {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\x00", "")
+	return strings.ToValidUTF8(s, "\uFFFD")
+}
+
 // fetchRawFile downloads a URL and returns the body bytes. Limit 1MB.
 func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 	resp, err := httpClient.Get(fileURL)
@@ -1065,16 +1148,16 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	source, normalized, err := detectImportSource(req.URL)
+	importKind, normalized, err := detectImportSource(req.URL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	httpClient := newGitHubHTTPClient(30 * time.Second)
 
 	var imported *importedSkill
-	switch source {
+	switch importKind {
 	case sourceClawHub:
 		imported, err = fetchFromClawHub(httpClient, normalized)
 	case sourceSkillsSh:
@@ -1096,6 +1179,11 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	skillSource := "clawhub"
+	if importKind == sourceSkillsSh {
+		skillSource = "skills_sh"
+	}
+
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
 		WorkspaceID: workspaceID,
 		CreatorID:   creatorID,
@@ -1104,6 +1192,7 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		Content:     imported.content,
 		Config:      map[string]any{},
 		Files:       files,
+		Source:      skillSource,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -1149,6 +1238,10 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 	if !h.canManageSkill(w, r, skill) {
 		return
 	}
+	if skill.Source == "repo" {
+		writeError(w, http.StatusForbidden, "skills synced from a repository cannot be edited here; detach first or re-sync from settings")
+		return
+	}
 
 	var req CreateSkillFileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1160,6 +1253,9 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid file path")
 		return
 	}
+
+	req.Path = sanitizeSkillTextForPostgres(req.Path)
+	req.Content = sanitizeSkillTextForPostgres(req.Content)
 
 	sf, err := h.Queries.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 		SkillID: skill.ID,
@@ -1181,6 +1277,10 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.canManageSkill(w, r, skill) {
+		return
+	}
+	if skill.Source == "repo" {
+		writeError(w, http.StatusForbidden, "skills synced from a repository cannot be edited here; detach first or re-sync from settings")
 		return
 	}
 

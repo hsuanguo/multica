@@ -13,9 +13,13 @@ WHERE id = $1;
 SELECT * FROM skill
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetSkillByWorkspaceAndName :one
+SELECT * FROM skill
+WHERE workspace_id = $1 AND name = $2;
+
 -- name: CreateSkill :one
-INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO skill (workspace_id, name, description, content, config, created_by, source, source_metadata, synced_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: UpdateSkill :one
@@ -30,6 +34,35 @@ RETURNING *;
 
 -- name: DeleteSkill :exec
 DELETE FROM skill WHERE id = $1;
+
+-- name: UpsertRepoSkill :one
+INSERT INTO skill (workspace_id, name, description, content, config, created_by, source, source_metadata, synced_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+ON CONFLICT (workspace_id, name) DO UPDATE SET
+    description = EXCLUDED.description,
+    content = EXCLUDED.content,
+    config = EXCLUDED.config,
+    source = EXCLUDED.source,
+    source_metadata = EXCLUDED.source_metadata,
+    synced_at = now(),
+    updated_at = now()
+RETURNING *;
+
+-- name: ListSkillsByRepoURL :many
+SELECT * FROM skill
+WHERE workspace_id = $1
+  AND source = 'repo'
+  AND source_metadata->>'repo_url' = $2
+ORDER BY name ASC;
+
+-- name: DetachSkillFromRepo :one
+UPDATE skill SET
+    source = 'manual',
+    source_metadata = '{}'::jsonb,
+    synced_at = NULL,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND source = 'repo'
+RETURNING *;
 
 -- Skill File CRUD
 
